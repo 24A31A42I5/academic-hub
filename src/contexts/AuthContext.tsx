@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { logger } from '@/lib/logger';
 
 type AppRole = 'admin' | 'faculty' | 'student';
 
@@ -39,12 +40,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .maybeSingle();
 
       if (error) {
-        console.error('Error fetching profile:', error);
+        logger.error('Error fetching profile', error);
         return null;
       }
       return data as Profile | null;
     } catch (err) {
-      console.error('Error in fetchProfile:', err);
+      logger.error('Error in fetchProfile', err);
       return null;
     }
   };
@@ -117,7 +118,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .single();
 
       if (profileError) {
-        console.error('Profile creation error:', profileError);
+        logger.error('Profile creation error', profileError);
         return { error: profileError };
       }
 
@@ -130,7 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
       if (roleError) {
-        console.error('Role creation error:', roleError);
+        logger.error('Role creation error', roleError);
         return { error: roleError };
       }
 
@@ -147,7 +148,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
 
         if (studentError) {
-          console.error('Student details error:', studentError);
+          logger.error('Student details error', studentError);
           return { error: studentError };
         }
       } else if (role === 'faculty' && additionalData) {
@@ -159,7 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
 
         if (facultyError) {
-          console.error('Faculty details error:', facultyError);
+          logger.error('Faculty details error', facultyError);
           return { error: facultyError };
         }
       }

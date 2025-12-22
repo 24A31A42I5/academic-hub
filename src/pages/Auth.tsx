@@ -9,16 +9,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Shield, ArrowLeft, Loader2 } from 'lucide-react';
 import { z } from 'zod';
+import { passwordSchema, emailSchema, fullNameSchema } from '@/lib/validation';
 
 const loginSchema = z.object({
-  email: z.string().email('Please enter a valid email'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  email: emailSchema,
+  password: z.string().min(1, 'Password is required'),
 });
 
 const studentSchema = z.object({
-  fullName: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Please enter a valid email'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  fullName: fullNameSchema,
+  email: emailSchema,
+  password: passwordSchema,
   rollNumber: z.string().min(1, 'Roll number is required'),
   year: z.string().min(1, 'Year is required'),
   branch: z.string().min(1, 'Branch is required'),
@@ -26,16 +27,16 @@ const studentSchema = z.object({
 });
 
 const facultySchema = z.object({
-  fullName: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Please enter a valid email'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  fullName: fullNameSchema,
+  email: emailSchema,
+  password: passwordSchema,
   facultyId: z.string().min(1, 'Faculty ID is required'),
 });
 
 const adminSchema = z.object({
-  fullName: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Please enter a valid email'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  fullName: fullNameSchema,
+  email: emailSchema,
+  password: passwordSchema,
 });
 
 type Role = 'admin' | 'faculty' | 'student';
