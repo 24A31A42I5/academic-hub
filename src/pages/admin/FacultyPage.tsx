@@ -8,8 +8,10 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Loader2, Upload, Search, Users, FileSpreadsheet, Download, UserPlus } from 'lucide-react';
+import { Loader2, Upload, Search, Users, FileSpreadsheet, Download, UserPlus, Pencil, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { logger } from '@/lib/logger';
 
@@ -28,6 +30,7 @@ interface FacultyDetails {
 
 interface Faculty {
   id: string;
+  user_id: string;
   full_name: string;
   email: string;
   created_at: string;
@@ -54,13 +57,14 @@ const FacultyPage = () => {
   
   // Single registration
   const [showSingleForm, setShowSingleForm] = useState(false);
-  const [singleFaculty, setSingleFaculty] = useState({
-    full_name: '',
-    email: '',
-    password: '',
-    faculty_id: '',
-  });
+  const [singleFaculty, setSingleFaculty] = useState({ full_name: '', email: '', password: '', faculty_id: '' });
   const [creatingOne, setCreatingOne] = useState(false);
+
+  // Edit dialog
+  const [editFaculty, setEditFaculty] = useState<Faculty | null>(null);
+  const [editForm, setEditForm] = useState({ full_name: '', faculty_id: '' });
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const fetchFaculty = useCallback(async () => {
     try {
@@ -69,6 +73,7 @@ const FacultyPage = () => {
         .from('profiles')
         .select(`
           id,
+          user_id,
           full_name,
           email,
           created_at,
@@ -129,9 +134,6 @@ const FacultyPage = () => {
   const handleBulkCreate = async () => {
     setUploading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not authenticated');
-
       const response = await supabase.functions.invoke('bulk-create-faculty', {
         body: { faculty: parsedFaculty },
       });
@@ -146,7 +148,6 @@ const FacultyPage = () => {
       
       if (results.failed.length > 0) {
         toast.error(`Failed to create ${results.failed.length} accounts`);
-        logger.error('Failed accounts count', results.failed.length);
       }
 
       setParsedFaculty([]);
@@ -168,9 +169,6 @@ const FacultyPage = () => {
 
     setCreatingOne(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not authenticated');
-
       const response = await supabase.functions.invoke('bulk-create-faculty', {
         body: { faculty: [singleFaculty] },
       });
@@ -210,6 +208,67 @@ const FacultyPage = () => {
     if (!f.faculty_details) return null;
     if (Array.isArray(f.faculty_details)) return f.faculty_details[0] || null;
     return f.faculty_details;
+  };
+
+  const handleEdit = (f: Faculty) => {
+    const details = getDetails(f);
+    setEditFaculty(f);
+    setEditForm({ full_name: f.full_name, faculty_id: details?.faculty_id || '' });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editFaculty) return;
+    setSaving(true);
+    try {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ full_name: editForm.full_name })
+        .eq('id', editFaculty.id);
+
+      if (profileError) throw profileError;
+
+      const { error: detailsError } = await supabase
+        .from('faculty_details')
+        .update({ faculty_id: editForm.faculty_id })
+        .eq('profile_id', editFaculty.id);
+
+      if (detailsError) throw detailsError;
+
+      toast.success('Faculty updated successfully');
+      setEditFaculty(null);
+      fetchFaculty();
+    } catch (error) {
+      logger.error('Error updating faculty', error);
+      toast.error('Failed to update faculty');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (f: Faculty) => {
+    setDeleting(f.id);
+    try {
+      // Delete faculty sections
+      await supabase.from('faculty_sections').delete().eq('faculty_profile_id', f.id);
+      
+      // Delete faculty details
+      await supabase.from('faculty_details').delete().eq('profile_id', f.id);
+      
+      // Delete user role
+      await supabase.from('user_roles').delete().eq('user_id', f.user_id);
+      
+      // Delete profile
+      const { error } = await supabase.from('profiles').delete().eq('id', f.id);
+      if (error) throw error;
+
+      toast.success('Faculty deleted successfully');
+      fetchFaculty();
+    } catch (error) {
+      logger.error('Error deleting faculty', error);
+      toast.error('Failed to delete faculty');
+    } finally {
+      setDeleting(null);
+    }
   };
 
   const filteredFaculty = faculty.filter(f => {
@@ -310,17 +369,8 @@ const FacultyPage = () => {
             </div>
             <div className="mt-4 flex justify-end">
               <Button variant="admin" onClick={handleSingleCreate} disabled={creatingOne}>
-                {creatingOne ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Create Faculty
-                  </>
-                )}
+                {creatingOne ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <UserPlus className="w-4 h-4 mr-2" />}
+                Create Faculty
               </Button>
             </div>
           </CardContent>
@@ -341,14 +391,7 @@ const FacultyPage = () => {
         <CardContent>
           <div className="flex items-center gap-4 mb-4">
             <div className="flex-1">
-              <Label htmlFor="file-upload" className="sr-only">Upload Excel</Label>
-              <Input
-                id="file-upload"
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleFileUpload}
-                className="cursor-pointer"
-              />
+              <Input id="file-upload" type="file" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} className="cursor-pointer" />
             </div>
             <Button variant="outline" size="icon" onClick={downloadTemplate} title="Download Template">
               <Download className="w-4 h-4" />
@@ -360,21 +403,10 @@ const FacultyPage = () => {
               <div className="flex justify-between items-center mb-4">
                 <h4 className="font-medium">Preview ({parsedFaculty.length} faculty)</h4>
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => { setParsedFaculty([]); setShowPreview(false); }}>
-                    Cancel
-                  </Button>
+                  <Button variant="outline" onClick={() => { setParsedFaculty([]); setShowPreview(false); }}>Cancel</Button>
                   <Button variant="admin" onClick={handleBulkCreate} disabled={uploading}>
-                    {uploading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                        Creating...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-4 h-4 mr-2" />
-                        Create {parsedFaculty.length} Accounts
-                      </>
-                    )}
+                    {uploading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
+                    Create {parsedFaculty.length} Accounts
                   </Button>
                 </div>
               </div>
@@ -399,9 +431,7 @@ const FacultyPage = () => {
                     ))}
                     {parsedFaculty.length > 10 && (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center text-muted-foreground">
-                          ... and {parsedFaculty.length - 10} more
-                        </TableCell>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">... and {parsedFaculty.length - 10} more</TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -423,12 +453,7 @@ const FacultyPage = () => {
             <div className="flex-1">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by name, email, or faculty ID..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
+                <Input placeholder="Search by name, email, or faculty ID..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
               </div>
             </div>
           </div>
@@ -441,14 +466,13 @@ const FacultyPage = () => {
                   <TableHead>Email</TableHead>
                   <TableHead>Faculty ID</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead className="w-[100px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredFaculty.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                      No faculty found
-                    </TableCell>
+                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No faculty found</TableCell>
                   </TableRow>
                 ) : (
                   filteredFaculty.map((f) => {
@@ -457,11 +481,27 @@ const FacultyPage = () => {
                       <TableRow key={f.id}>
                         <TableCell className="font-medium">{f.full_name}</TableCell>
                         <TableCell>{f.email}</TableCell>
+                        <TableCell><Badge variant="outline">{details?.faculty_id || '-'}</Badge></TableCell>
+                        <TableCell className="text-muted-foreground">{new Date(f.created_at).toLocaleDateString()}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{details?.faculty_id || '-'}</Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {new Date(f.created_at).toLocaleDateString()}
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => handleEdit(f)}><Pencil className="w-4 h-4" /></Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"><Trash2 className="w-4 h-4" /></Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete Faculty</AlertDialogTitle>
+                                  <AlertDialogDescription>Are you sure you want to delete {f.full_name}? This will also remove their section assignments.</AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleDelete(f)} disabled={deleting === f.id}>{deleting === f.id ? 'Deleting...' : 'Delete'}</AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -472,6 +512,29 @@ const FacultyPage = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editFaculty} onOpenChange={() => setEditFaculty(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Faculty</DialogTitle></DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div>
+              <Label>Full Name</Label>
+              <Input value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} />
+            </div>
+            <div>
+              <Label>Faculty ID</Label>
+              <Input value={editForm.faculty_id} onChange={(e) => setEditForm({ ...editForm, faculty_id: e.target.value })} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditFaculty(null)}>Cancel</Button>
+            <Button onClick={handleSaveEdit} disabled={saving}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };

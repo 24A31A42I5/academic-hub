@@ -9,12 +9,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Loader2, Upload, Search, Users, CheckCircle, XCircle, FileSpreadsheet, Download } from 'lucide-react';
+import { Loader2, Upload, Search, Users, CheckCircle, XCircle, FileSpreadsheet, Download, Pencil, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { logger } from '@/lib/logger';
-
 
 const navItems = [
   { label: 'Overview', href: '/admin', icon: DashboardIcons.Home },
@@ -42,6 +42,7 @@ interface Student {
   full_name: string;
   email: string;
   created_at: string;
+  user_id: string;
   student_details: StudentDetails | StudentDetails[] | null;
 }
 
@@ -72,13 +73,20 @@ const StudentsPage = () => {
   const [parsedStudents, setParsedStudents] = useState<ParsedStudent[]>([]);
   const [showPreview, setShowPreview] = useState(false);
 
+  // Edit dialog
+  const [editStudent, setEditStudent] = useState<Student | null>(null);
+  const [editForm, setEditForm] = useState({ full_name: '', year: '', branch: '', section: '', roll_number: '' });
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
   const fetchStudents = useCallback(async () => {
     try {
       setLoading(true);
-      let query = supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select(`
           id,
+          user_id,
           full_name,
           email,
           created_at,
@@ -92,8 +100,6 @@ const StudentsPage = () => {
         `)
         .eq('role', 'student')
         .order('created_at', { ascending: false });
-
-      const { data, error } = await query;
 
       if (error) throw error;
       setStudents(data || []);
@@ -179,7 +185,6 @@ const StudentsPage = () => {
       
       if (results.failed.length > 0) {
         toast.error(`Failed to create ${results.failed.length} accounts`);
-        logger.error('Failed accounts count', results.failed.length);
       }
 
       setParsedStudents([]);
@@ -207,14 +212,83 @@ const StudentsPage = () => {
     XLSX.writeFile(wb, 'student_template.xlsx');
   };
 
-  // Helper to get student details
   const getDetails = (student: Student): StudentDetails | null => {
     if (!student.student_details) return null;
     if (Array.isArray(student.student_details)) return student.student_details[0] || null;
     return student.student_details;
   };
 
-  // Filter students
+  const handleEdit = (student: Student) => {
+    const details = getDetails(student);
+    setEditStudent(student);
+    setEditForm({
+      full_name: student.full_name,
+      year: details?.year?.toString() || '',
+      branch: details?.branch || '',
+      section: details?.section || '',
+      roll_number: details?.roll_number || '',
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editStudent) return;
+    setSaving(true);
+    try {
+      // Update profile
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ full_name: editForm.full_name })
+        .eq('id', editStudent.id);
+
+      if (profileError) throw profileError;
+
+      // Update student details
+      const { error: detailsError } = await supabase
+        .from('student_details')
+        .update({
+          year: parseInt(editForm.year),
+          branch: editForm.branch,
+          section: editForm.section,
+          roll_number: editForm.roll_number,
+        })
+        .eq('profile_id', editStudent.id);
+
+      if (detailsError) throw detailsError;
+
+      toast.success('Student updated successfully');
+      setEditStudent(null);
+      fetchStudents();
+    } catch (error) {
+      logger.error('Error updating student', error);
+      toast.error('Failed to update student');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (student: Student) => {
+    setDeleting(student.id);
+    try {
+      // Delete student details first
+      await supabase.from('student_details').delete().eq('profile_id', student.id);
+      
+      // Delete user role
+      await supabase.from('user_roles').delete().eq('user_id', student.user_id);
+      
+      // Delete profile
+      const { error } = await supabase.from('profiles').delete().eq('id', student.id);
+      if (error) throw error;
+
+      toast.success('Student deleted successfully');
+      fetchStudents();
+    } catch (error) {
+      logger.error('Error deleting student', error);
+      toast.error('Failed to delete student');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
   const filteredStudents = students.filter(student => {
     const details = getDetails(student);
     
@@ -506,12 +580,13 @@ const StudentsPage = () => {
                   <TableHead>Branch</TableHead>
                   <TableHead>Section</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-[100px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredStudents.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                       No students found
                     </TableCell>
                   </TableRow>
@@ -539,6 +614,34 @@ const StudentsPage = () => {
                             </Badge>
                           )}
                         </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => handleEdit(student)}>
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete Student</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Are you sure you want to delete {student.full_name}? This action cannot be undone.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleDelete(student)} disabled={deleting === student.id}>
+                                    {deleting === student.id ? 'Deleting...' : 'Delete'}
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -548,6 +651,61 @@ const StudentsPage = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Edit Dialog */}
+      <Dialog open={!!editStudent} onOpenChange={() => setEditStudent(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Student</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div>
+              <Label>Full Name</Label>
+              <Input value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} />
+            </div>
+            <div>
+              <Label>Roll Number</Label>
+              <Input value={editForm.roll_number} onChange={(e) => setEditForm({ ...editForm, roll_number: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <Label>Year</Label>
+                <Select value={editForm.year} onValueChange={(v) => setEditForm({ ...editForm, year: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {YEARS.map((y) => <SelectItem key={y} value={y.toString()}>Year {y}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Branch</Label>
+                <Select value={editForm.branch} onValueChange={(v) => setEditForm({ ...editForm, branch: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {BRANCHES.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Section</Label>
+                <Select value={editForm.section} onValueChange={(v) => setEditForm({ ...editForm, section: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {SECTIONS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditStudent(null)}>Cancel</Button>
+            <Button onClick={handleSaveEdit} disabled={saving}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };
