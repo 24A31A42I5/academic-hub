@@ -1,9 +1,50 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+// Allowed origins for CORS - restrict to your domain
+const getAllowedOrigins = (): string[] => {
+  const origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+  ];
+  
+  // Add production origin if available
+  const productionOrigin = Deno.env.get("APP_ORIGIN");
+  if (productionOrigin) {
+    origins.push(productionOrigin);
+  }
+  
+  // Add Lovable preview domains
+  origins.push("https://lovable.dev");
+  origins.push(/https:\/\/.*\.lovable\.app/.source);
+  
+  return origins;
+};
+
+const getCorsHeaders = (origin: string | null): Record<string, string> => {
+  const allowedOrigins = getAllowedOrigins();
+  
+  // Check if origin is allowed
+  let allowedOrigin = "";
+  if (origin) {
+    for (const allowed of allowedOrigins) {
+      if (allowed === origin || (allowed.includes(".*") && new RegExp(allowed).test(origin))) {
+        allowedOrigin = origin;
+        break;
+      }
+      // Check for lovable.app domains
+      if (origin.endsWith(".lovable.app") || origin === "https://lovable.dev") {
+        allowedOrigin = origin;
+        break;
+      }
+    }
+  }
+  
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin || getAllowedOrigins()[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Credentials": "true",
+  };
 };
 
 interface StudentData {
@@ -20,7 +61,42 @@ interface BulkCreateRequest {
   students: StudentData[];
 }
 
+// Validate password strength
+const isStrongPassword = (password: string): boolean => {
+  return (
+    password.length >= 8 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /[0-9]/.test(password) &&
+    /[^A-Za-z0-9]/.test(password)
+  );
+};
+
+// Generate secure password
+const generateSecurePassword = (): string => {
+  const uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lowercase = "abcdefghijkmnpqrstuvwxyz";
+  const numbers = "23456789";
+  const special = "!@#$%&*";
+  
+  let password = "";
+  password += uppercase[Math.floor(Math.random() * uppercase.length)];
+  password += lowercase[Math.floor(Math.random() * lowercase.length)];
+  password += numbers[Math.floor(Math.random() * numbers.length)];
+  password += special[Math.floor(Math.random() * special.length)];
+  
+  const allChars = uppercase + lowercase + numbers + special;
+  for (let i = 0; i < 8; i++) {
+    password += allChars[Math.floor(Math.random() * allChars.length)];
+  }
+  
+  return password.split("").sort(() => Math.random() - 0.5).join("");
+};
+
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin");
+  const corsHeaders = getCorsHeaders(origin);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -40,7 +116,7 @@ serve(async (req: Request) => {
     // Verify the request is from an authenticated admin
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: "No authorization header" }), {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -64,7 +140,7 @@ serve(async (req: Request) => {
       .single();
 
     if (roleData?.role !== "admin") {
-      return new Response(JSON.stringify({ error: "Only admins can bulk create students" }), {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -72,6 +148,22 @@ serve(async (req: Request) => {
 
     const { students }: BulkCreateRequest = await req.json();
     
+    // Validate input
+    if (!Array.isArray(students) || students.length === 0) {
+      return new Response(JSON.stringify({ error: "Invalid request: students array required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Rate limit: max 100 students per request
+    if (students.length > 100) {
+      return new Response(JSON.stringify({ error: "Maximum 100 students per request" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const results = {
       success: [] as string[],
       failed: [] as { email: string; error: string }[],
@@ -79,10 +171,22 @@ serve(async (req: Request) => {
 
     for (const student of students) {
       try {
+        // Validate required fields
+        if (!student.email || !student.full_name || !student.roll_number) {
+          results.failed.push({ email: student.email || "unknown", error: "Missing required fields" });
+          continue;
+        }
+
+        // Use provided password or generate secure one
+        let password = student.password;
+        if (!password || !isStrongPassword(password)) {
+          password = generateSecurePassword();
+        }
+
         // Create user in auth
         const { data: authData, error: createError } = await supabaseAdmin.auth.admin.createUser({
           email: student.email,
-          password: student.password,
+          password: password,
           email_confirm: true,
           user_metadata: {
             full_name: student.full_name,
@@ -90,12 +194,12 @@ serve(async (req: Request) => {
         });
 
         if (createError) {
-          results.failed.push({ email: student.email, error: createError.message });
+          results.failed.push({ email: student.email, error: "Account creation failed" });
           continue;
         }
 
         if (!authData.user) {
-          results.failed.push({ email: student.email, error: "Failed to create user" });
+          results.failed.push({ email: student.email, error: "User creation failed" });
           continue;
         }
 
@@ -112,7 +216,7 @@ serve(async (req: Request) => {
           .single();
 
         if (profileError) {
-          results.failed.push({ email: student.email, error: `Profile error: ${profileError.message}` });
+          results.failed.push({ email: student.email, error: "Profile creation failed" });
           continue;
         }
 
@@ -135,26 +239,27 @@ serve(async (req: Request) => {
           });
 
         if (detailsError) {
-          results.failed.push({ email: student.email, error: `Details error: ${detailsError.message}` });
+          results.failed.push({ email: student.email, error: "Details creation failed" });
           continue;
         }
 
         results.success.push(student.email);
       } catch (err) {
-        results.failed.push({ email: student.email, error: String(err) });
+        results.failed.push({ email: student.email, error: "Unexpected error" });
       }
     }
+
+    console.log(`Bulk create completed: ${results.success.length} success, ${results.failed.length} failed`);
 
     return new Response(JSON.stringify(results), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: unknown) {
-    console.error("Error in bulk-create-students:", error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return new Response(JSON.stringify({ error: errorMessage }), {
+    console.error("Error in bulk-create-students");
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...getCorsHeaders(req.headers.get("origin")), "Content-Type": "application/json" },
     });
   }
 });

@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
@@ -13,6 +12,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'sonner';
 import { Loader2, Upload, Search, Users, CheckCircle, XCircle, FileSpreadsheet, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { logger } from '@/lib/logger';
+import { generateSecurePassword } from '@/lib/validation';
 
 const navItems = [
   { label: 'Overview', href: '/admin', icon: DashboardIcons.Home },
@@ -52,7 +54,6 @@ interface ParsedStudent {
 
 const StudentsPage = () => {
   const { profile, loading: authLoading } = useAuth();
-  const navigate = useNavigate();
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -70,12 +71,6 @@ const StudentsPage = () => {
   const [uploadSection, setUploadSection] = useState<string>('');
   const [parsedStudents, setParsedStudents] = useState<ParsedStudent[]>([]);
   const [showPreview, setShowPreview] = useState(false);
-
-  useEffect(() => {
-    if (!authLoading && (!profile || profile.role !== 'admin')) {
-      navigate('/auth');
-    }
-  }, [profile, authLoading, navigate]);
 
   const fetchStudents = useCallback(async () => {
     try {
@@ -103,7 +98,7 @@ const StudentsPage = () => {
       if (error) throw error;
       setStudents(data || []);
     } catch (error) {
-      console.error('Error fetching students:', error);
+      logger.error('Error fetching students', error);
       toast.error('Failed to fetch students');
     } finally {
       setLoading(false);
@@ -134,7 +129,7 @@ const StudentsPage = () => {
       const parsed: ParsedStudent[] = jsonData.map((row) => ({
         full_name: row['Name'] || row['name'] || row['Full Name'] || row['full_name'] || '',
         email: row['Email'] || row['email'] || row['Mail'] || row['mail'] || '',
-        password: row['Password'] || row['password'] || 'Student@123',
+        password: row['Password'] || row['password'] || generateSecurePassword(),
         roll_number: row['Roll Number'] || row['roll_number'] || row['Roll'] || row['roll'] || '',
       })).filter(s => s.full_name && s.email && s.roll_number);
 
@@ -147,7 +142,7 @@ const StudentsPage = () => {
       setShowPreview(true);
       toast.success(`Found ${parsed.length} students in the file`);
     } catch (error) {
-      console.error('Error parsing file:', error);
+      logger.error('Error parsing file', error);
       toast.error('Failed to parse Excel file');
     }
   };
@@ -183,8 +178,8 @@ const StudentsPage = () => {
       }
       
       if (results.failed.length > 0) {
-        toast.error(`Failed to create ${results.failed.length} accounts. Check console for details.`);
-        console.error('Failed accounts:', results.failed);
+        toast.error(`Failed to create ${results.failed.length} accounts`);
+        logger.error('Failed accounts count', results.failed.length);
       }
 
       setParsedStudents([]);
@@ -194,7 +189,7 @@ const StudentsPage = () => {
       setUploadSection('');
       fetchStudents();
     } catch (error) {
-      console.error('Error creating students:', error);
+      logger.error('Error creating students', error);
       toast.error('Failed to create student accounts');
     } finally {
       setUploading(false);
@@ -203,8 +198,8 @@ const StudentsPage = () => {
 
   const downloadTemplate = () => {
     const template = [
-      { Name: 'John Doe', Email: 'john@example.com', Password: 'Student@123', 'Roll Number': 'CS001' },
-      { Name: 'Jane Smith', Email: 'jane@example.com', Password: 'Student@123', 'Roll Number': 'CS002' },
+      { Name: 'John Doe', Email: 'john@example.com', Password: 'Secure@Pass1', 'Roll Number': 'CS001' },
+      { Name: 'Jane Smith', Email: 'jane@example.com', Password: 'Strong#Pass2', 'Roll Number': 'CS002' },
     ];
     const ws = XLSX.utils.json_to_sheet(template);
     const wb = XLSX.utils.book_new();

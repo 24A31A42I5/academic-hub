@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
@@ -7,6 +6,8 @@ import { StatsCard } from '@/components/dashboard/StatsCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Users, GraduationCap, BookOpen, AlertTriangle, TrendingUp } from 'lucide-react';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { logger } from '@/lib/logger';
 
 const navItems = [
   { label: 'Overview', href: '/admin', icon: DashboardIcons.Home },
@@ -26,16 +27,9 @@ interface Stats {
 
 const AdminDashboard = () => {
   const { profile, loading: authLoading } = useAuth();
-  const navigate = useNavigate();
   const [stats, setStats] = useState<Stats>({ totalStudents: 0, totalFaculty: 0, totalAssignments: 0, fraudAlerts: 0 });
   const [recentStudents, setRecentStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!authLoading && (!profile || profile.role !== 'admin')) {
-      navigate('/auth');
-    }
-  }, [profile, authLoading, navigate]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -76,7 +70,7 @@ const AdminDashboard = () => {
 
         setRecentStudents(students || []);
       } catch (error) {
-        console.error('Error fetching data:', error);
+        logger.error('Error fetching dashboard data', error);
       } finally {
         setLoading(false);
       }
