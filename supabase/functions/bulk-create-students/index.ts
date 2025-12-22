@@ -32,8 +32,8 @@ const getCorsHeaders = (origin: string | null): Record<string, string> => {
         allowedOrigin = origin;
         break;
       }
-      // Check for lovable.app domains
-      if (origin.endsWith(".lovable.app") || origin === "https://lovable.dev") {
+      // Check for lovable domains
+      if (origin.endsWith(".lovable.app") || origin.endsWith(".lovableproject.com") || origin === "https://lovable.dev") {
         allowedOrigin = origin;
         break;
       }
@@ -177,10 +177,11 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // Use provided password or generate secure one
-        let password = student.password;
-        if (!password || !isStrongPassword(password)) {
-          password = generateSecurePassword();
+        // Use provided password directly (admin is responsible for password strength)
+        const password = student.password;
+        if (!password) {
+          results.failed.push({ email: student.email, error: "Password is required" });
+          continue;
         }
 
         // Create user in auth
