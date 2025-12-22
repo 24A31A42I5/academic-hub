@@ -14,7 +14,7 @@ import { Loader2, Upload, Search, Users, CheckCircle, XCircle, FileSpreadsheet, 
 import * as XLSX from 'xlsx';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { logger } from '@/lib/logger';
-import { generateSecurePassword } from '@/lib/validation';
+
 
 const navItems = [
   { label: 'Overview', href: '/admin', icon: DashboardIcons.Home },
@@ -129,12 +129,12 @@ const StudentsPage = () => {
       const parsed: ParsedStudent[] = jsonData.map((row) => ({
         full_name: row['Name'] || row['name'] || row['Full Name'] || row['full_name'] || '',
         email: row['Email'] || row['email'] || row['Mail'] || row['mail'] || '',
-        password: row['Password'] || row['password'] || generateSecurePassword(),
+        password: row['Password'] || row['password'] || '',
         roll_number: row['Roll Number'] || row['roll_number'] || row['Roll'] || row['roll'] || '',
-      })).filter(s => s.full_name && s.email && s.roll_number);
+      })).filter(s => s.full_name && s.email && s.roll_number && s.password);
 
       if (parsed.length === 0) {
-        toast.error('No valid student data found. Ensure columns: Name, Email, Roll Number');
+        toast.error('No valid student data found. Ensure columns: Name, Email, Password, Roll Number');
         return;
       }
 
@@ -298,7 +298,7 @@ const StudentsPage = () => {
             Bulk Student Registration
           </CardTitle>
           <CardDescription>
-            Upload an Excel file to register multiple students at once
+            Excel file must have columns: <strong>Name, Email, Password, Roll Number</strong>. Select Year, Branch, and Section below.
           </CardDescription>
         </CardHeader>
         <CardContent>
