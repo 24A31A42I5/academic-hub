@@ -395,6 +395,7 @@ const StudentsPage = () => {
                     <TableRow>
                       <TableHead>Name</TableHead>
                       <TableHead>Email</TableHead>
+                      <TableHead>Password</TableHead>
                       <TableHead>Roll Number</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -403,12 +404,13 @@ const StudentsPage = () => {
                       <TableRow key={idx}>
                         <TableCell>{student.full_name}</TableCell>
                         <TableCell>{student.email}</TableCell>
+                        <TableCell className="font-mono text-xs">{student.password}</TableCell>
                         <TableCell>{student.roll_number}</TableCell>
                       </TableRow>
                     ))}
                     {parsedStudents.length > 10 && (
                       <TableRow>
-                        <TableCell colSpan={3} className="text-center text-muted-foreground">
+                        <TableCell colSpan={4} className="text-center text-muted-foreground">
                           ... and {parsedStudents.length - 10} more
                         </TableCell>
                       </TableRow>
