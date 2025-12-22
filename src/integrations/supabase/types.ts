@@ -156,6 +156,7 @@ export type Database = {
         Row: {
           branch: string
           created_at: string
+          has_logged_in: boolean | null
           id: string
           profile_id: string
           roll_number: string
@@ -165,6 +166,7 @@ export type Database = {
         Insert: {
           branch: string
           created_at?: string
+          has_logged_in?: boolean | null
           id?: string
           profile_id: string
           roll_number: string
@@ -174,6 +176,7 @@ export type Database = {
         Update: {
           branch?: string
           created_at?: string
+          has_logged_in?: boolean | null
           id?: string
           profile_id?: string
           roll_number?: string
