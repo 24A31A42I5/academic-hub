@@ -171,7 +171,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    
+    // If sign in successful and user is a student, mark as logged in
+    if (!error && data.user) {
+      setTimeout(async () => {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('id, role')
+          .eq('user_id', data.user.id)
+          .single();
+        
+        if (profileData?.role === 'student') {
+          await supabase
+            .from('student_details')
+            .update({ has_logged_in: true })
+            .eq('profile_id', profileData.id);
+        }
+      }, 0);
+    }
+    
     return { error };
   };
 
