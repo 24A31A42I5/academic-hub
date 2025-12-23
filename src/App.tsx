@@ -12,6 +12,10 @@ import FacultyPage from "./pages/admin/FacultyPage";
 import SectionMappingPage from "./pages/admin/SectionMappingPage";
 import AssignmentsPage from "./pages/admin/AssignmentsPage";
 import FacultyDashboard from "./pages/faculty/FacultyDashboard";
+import FacultySections from "./pages/faculty/FacultySections";
+import FacultyAssignments from "./pages/faculty/FacultyAssignments";
+import FacultySubmissions from "./pages/faculty/FacultySubmissions";
+import FacultyReviews from "./pages/faculty/FacultyReviews";
 import StudentDashboard from "./pages/student/StudentDashboard";
 import NotFound from "./pages/NotFound";
 
@@ -33,6 +37,10 @@ const App = () => (
             <Route path="/admin/sections" element={<SectionMappingPage />} />
             <Route path="/admin/assignments" element={<AssignmentsPage />} />
             <Route path="/faculty" element={<FacultyDashboard />} />
+            <Route path="/faculty/sections" element={<FacultySections />} />
+            <Route path="/faculty/assignments" element={<FacultyAssignments />} />
+            <Route path="/faculty/submissions" element={<FacultySubmissions />} />
+            <Route path="/faculty/reviews" element={<FacultyReviews />} />
             <Route path="/student" element={<StudentDashboard />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

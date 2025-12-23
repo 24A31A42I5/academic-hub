@@ -66,6 +66,7 @@ const StudentsPage = () => {
   const [filterYear, setFilterYear] = useState<string>('all');
   const [filterBranch, setFilterBranch] = useState<string>('all');
   const [filterSection, setFilterSection] = useState<string>('all');
+  const [filterSemester, setFilterSemester] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   
   // Bulk upload form
@@ -346,13 +347,14 @@ const StudentsPage = () => {
       details?.roll_number?.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesYear = filterYear === 'all' || details?.year?.toString() === filterYear;
+    const matchesSemester = filterSemester === 'all' || details?.semester === filterSemester;
     const matchesBranch = filterBranch === 'all' || details?.branch === filterBranch;
     const matchesSection = filterSection === 'all' || details?.section === filterSection;
     const matchesStatus = filterStatus === 'all' || 
       (filterStatus === 'registered' && details?.has_logged_in) ||
       (filterStatus === 'not_registered' && !details?.has_logged_in);
 
-    return matchesSearch && matchesYear && matchesBranch && matchesSection && matchesStatus;
+    return matchesSearch && matchesYear && matchesSemester && matchesBranch && matchesSection && matchesStatus;
   });
 
   const stats = {
@@ -673,6 +675,19 @@ const StudentsPage = () => {
                 {YEARS.map((year) => (
                   <SelectItem key={year} value={year.toString()}>
                     Year {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterSemester} onValueChange={setFilterSemester}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Semester" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Semesters</SelectItem>
+                {SEMESTERS.map((sem) => (
+                  <SelectItem key={sem} value={sem}>
+                    Sem {sem}
                   </SelectItem>
                 ))}
               </SelectContent>
