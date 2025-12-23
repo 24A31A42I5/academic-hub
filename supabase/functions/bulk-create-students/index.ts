@@ -55,6 +55,7 @@ interface StudentData {
   year: number;
   branch: string;
   section: string;
+  semester: string;
 }
 
 interface BulkCreateRequest {
@@ -236,6 +237,7 @@ serve(async (req: Request) => {
             year: student.year,
             branch: student.branch,
             section: student.section,
+            semester: student.semester || 'I',
             has_logged_in: false,
           });
 

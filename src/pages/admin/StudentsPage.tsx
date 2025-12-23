@@ -28,12 +28,14 @@ const navItems = [
 const BRANCHES = ['CSE', 'AIML', 'AI', 'DS', 'IT', 'ECE', 'EEE', 'MECH', 'CIVIL'];
 const YEARS = [1, 2, 3, 4];
 const SECTIONS = ['A', 'B', 'C'];
+const SEMESTERS = ['I', 'II'];
 
 interface StudentDetails {
   roll_number: string;
   year: number;
   branch: string;
   section: string;
+  semester: string;
   has_logged_in: boolean;
 }
 
@@ -70,12 +72,21 @@ const StudentsPage = () => {
   const [uploadYear, setUploadYear] = useState<string>('');
   const [uploadBranch, setUploadBranch] = useState<string>('');
   const [uploadSection, setUploadSection] = useState<string>('');
+  const [uploadSemester, setUploadSemester] = useState<string>('');
   const [parsedStudents, setParsedStudents] = useState<ParsedStudent[]>([]);
   const [showPreview, setShowPreview] = useState(false);
 
+  // Bulk change state
+  const [showBulkChange, setShowBulkChange] = useState(false);
+  const [bulkFromYear, setBulkFromYear] = useState<string>('');
+  const [bulkFromSemester, setBulkFromSemester] = useState<string>('');
+  const [bulkToYear, setBulkToYear] = useState<string>('');
+  const [bulkToSemester, setBulkToSemester] = useState<string>('');
+  const [bulkChanging, setBulkChanging] = useState(false);
+
   // Edit dialog
   const [editStudent, setEditStudent] = useState<Student | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', year: '', branch: '', section: '', roll_number: '' });
+  const [editForm, setEditForm] = useState({ full_name: '', year: '', branch: '', section: '', semester: '', roll_number: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -95,6 +106,7 @@ const StudentsPage = () => {
             year,
             branch,
             section,
+            semester,
             has_logged_in
           )
         `)
@@ -121,8 +133,8 @@ const StudentsPage = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!uploadYear || !uploadBranch || !uploadSection) {
-      toast.error('Please select Year, Branch, and Section before uploading');
+    if (!uploadYear || !uploadBranch || !uploadSection || !uploadSemester) {
+      toast.error('Please select Year, Semester, Branch, and Section before uploading');
       return;
     }
 
@@ -154,8 +166,8 @@ const StudentsPage = () => {
   };
 
   const handleBulkCreate = async () => {
-    if (!uploadYear || !uploadBranch || !uploadSection) {
-      toast.error('Please select Year, Branch, and Section');
+    if (!uploadYear || !uploadBranch || !uploadSection || !uploadSemester) {
+      toast.error('Please select Year, Semester, Branch, and Section');
       return;
     }
 
@@ -169,6 +181,7 @@ const StudentsPage = () => {
         year: parseInt(uploadYear),
         branch: uploadBranch,
         section: uploadSection,
+        semester: uploadSemester,
       }));
 
       const response = await supabase.functions.invoke('bulk-create-students', {
@@ -192,6 +205,7 @@ const StudentsPage = () => {
       setUploadYear('');
       setUploadBranch('');
       setUploadSection('');
+      setUploadSemester('');
       fetchStudents();
     } catch (error) {
       logger.error('Error creating students', error);
@@ -226,6 +240,7 @@ const StudentsPage = () => {
       year: details?.year?.toString() || '',
       branch: details?.branch || '',
       section: details?.section || '',
+      semester: details?.semester || 'I',
       roll_number: details?.roll_number || '',
     });
   };
@@ -249,6 +264,7 @@ const StudentsPage = () => {
           year: parseInt(editForm.year),
           branch: editForm.branch,
           section: editForm.section,
+          semester: editForm.semester,
           roll_number: editForm.roll_number,
         })
         .eq('profile_id', editStudent.id);
@@ -286,6 +302,38 @@ const StudentsPage = () => {
       toast.error('Failed to delete student');
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleBulkYearSemChange = async () => {
+    if (!bulkFromYear || !bulkFromSemester || !bulkToYear || !bulkToSemester) {
+      toast.error('Please fill all fields');
+      return;
+    }
+
+    setBulkChanging(true);
+    try {
+      const { data, error } = await supabase
+        .from('student_details')
+        .update({ year: parseInt(bulkToYear), semester: bulkToSemester })
+        .eq('year', parseInt(bulkFromYear))
+        .eq('semester', bulkFromSemester)
+        .select();
+
+      if (error) throw error;
+
+      toast.success(`Updated ${data?.length || 0} students from Year ${bulkFromYear} Sem ${bulkFromSemester} to Year ${bulkToYear} Sem ${bulkToSemester}`);
+      setShowBulkChange(false);
+      setBulkFromYear('');
+      setBulkFromSemester('');
+      setBulkToYear('');
+      setBulkToSemester('');
+      fetchStudents();
+    } catch (error) {
+      logger.error('Error bulk updating students', error);
+      toast.error('Failed to bulk update students');
+    } finally {
+      setBulkChanging(false);
     }
   };
 
@@ -372,11 +420,11 @@ const StudentsPage = () => {
             Bulk Student Registration
           </CardTitle>
           <CardDescription>
-            Excel file must have columns: <strong>Name, Email, Password, Roll Number</strong>. Select Year, Branch, and Section below.
+            Excel file must have columns: <strong>Name, Email, Password, Roll Number</strong>. Select Year, Semester, Branch, and Section below.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
             <div>
               <Label htmlFor="upload-year">Year</Label>
               <Select value={uploadYear} onValueChange={setUploadYear}>
@@ -387,6 +435,21 @@ const StudentsPage = () => {
                   {YEARS.map((year) => (
                     <SelectItem key={year} value={year.toString()}>
                       Year {year}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="upload-semester">Semester</Label>
+              <Select value={uploadSemester} onValueChange={setUploadSemester}>
+                <SelectTrigger id="upload-semester">
+                  <SelectValue placeholder="Select Sem" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SEMESTERS.map((sem) => (
+                    <SelectItem key={sem} value={sem}>
+                      Sem {sem}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -431,7 +494,7 @@ const StudentsPage = () => {
                   accept=".xlsx,.xls,.csv"
                   onChange={handleFileUpload}
                   className="cursor-pointer"
-                  disabled={!uploadYear || !uploadBranch || !uploadSection}
+                  disabled={!uploadYear || !uploadBranch || !uploadSection || !uploadSemester}
                 />
               </div>
               <Button variant="outline" size="icon" onClick={downloadTemplate} title="Download Template">
@@ -495,6 +558,90 @@ const StudentsPage = () => {
             </div>
           )}
         </CardContent>
+      </Card>
+
+      {/* Bulk Year/Semester Change Section */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Bulk Year/Semester Change
+            </span>
+            <Button variant="outline" size="sm" onClick={() => setShowBulkChange(!showBulkChange)}>
+              {showBulkChange ? 'Hide' : 'Show'}
+            </Button>
+          </CardTitle>
+          <CardDescription>
+            Move all students from one year/semester to another
+          </CardDescription>
+        </CardHeader>
+        {showBulkChange && (
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+              <div>
+                <Label>From Year</Label>
+                <Select value={bulkFromYear} onValueChange={setBulkFromYear}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {YEARS.map((y) => (
+                      <SelectItem key={y} value={y.toString()}>Year {y}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>From Semester</Label>
+                <Select value={bulkFromSemester} onValueChange={setBulkFromSemester}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sem" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SEMESTERS.map((s) => (
+                      <SelectItem key={s} value={s}>Sem {s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>To Year</Label>
+                <Select value={bulkToYear} onValueChange={setBulkToYear}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {YEARS.map((y) => (
+                      <SelectItem key={y} value={y.toString()}>Year {y}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>To Semester</Label>
+                <Select value={bulkToSemester} onValueChange={setBulkToSemester}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sem" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SEMESTERS.map((s) => (
+                      <SelectItem key={s} value={s}>Sem {s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button 
+                variant="admin" 
+                onClick={handleBulkYearSemChange} 
+                disabled={bulkChanging || !bulkFromYear || !bulkFromSemester || !bulkToYear || !bulkToSemester}
+              >
+                {bulkChanging ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Apply Change
+              </Button>
+            </div>
+          </CardContent>
+        )}
       </Card>
 
       {/* Students List */}
@@ -577,6 +724,7 @@ const StudentsPage = () => {
                   <TableHead>Email</TableHead>
                   <TableHead>Roll Number</TableHead>
                   <TableHead>Year</TableHead>
+                  <TableHead>Sem</TableHead>
                   <TableHead>Branch</TableHead>
                   <TableHead>Section</TableHead>
                   <TableHead>Status</TableHead>
@@ -586,7 +734,7 @@ const StudentsPage = () => {
               <TableBody>
                 {filteredStudents.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                       No students found
                     </TableCell>
                   </TableRow>
@@ -599,6 +747,7 @@ const StudentsPage = () => {
                         <TableCell>{student.email}</TableCell>
                         <TableCell>{details?.roll_number || '-'}</TableCell>
                         <TableCell>{details?.year || '-'}</TableCell>
+                        <TableCell>{details?.semester || '-'}</TableCell>
                         <TableCell>{details?.branch || '-'}</TableCell>
                         <TableCell>{details?.section || '-'}</TableCell>
                         <TableCell>
@@ -667,7 +816,7 @@ const StudentsPage = () => {
               <Label>Roll Number</Label>
               <Input value={editForm.roll_number} onChange={(e) => setEditForm({ ...editForm, roll_number: e.target.value })} />
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Year</Label>
                 <Select value={editForm.year} onValueChange={(v) => setEditForm({ ...editForm, year: v })}>
@@ -677,6 +826,17 @@ const StudentsPage = () => {
                   </SelectContent>
                 </Select>
               </div>
+              <div>
+                <Label>Semester</Label>
+                <Select value={editForm.semester} onValueChange={(v) => setEditForm({ ...editForm, semester: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {SEMESTERS.map((s) => <SelectItem key={s} value={s}>Sem {s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Branch</Label>
                 <Select value={editForm.branch} onValueChange={(v) => setEditForm({ ...editForm, branch: v })}>
