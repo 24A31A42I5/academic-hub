@@ -161,6 +161,7 @@ export type Database = {
           profile_id: string
           roll_number: string
           section: string
+          semester: string
           year: number
         }
         Insert: {
@@ -171,6 +172,7 @@ export type Database = {
           profile_id: string
           roll_number: string
           section: string
+          semester?: string
           year: number
         }
         Update: {
@@ -181,6 +183,7 @@ export type Database = {
           profile_id?: string
           roll_number?: string
           section?: string
+          semester?: string
           year?: number
         }
         Relationships: [
