@@ -15,6 +15,7 @@ const navItems = [
   { label: 'Overview', href: '/student', icon: DashboardIcons.Home },
   { label: 'Assignments', href: '/student/assignments', icon: DashboardIcons.BookOpen },
   { label: 'My Submissions', href: '/student/submissions', icon: DashboardIcons.FileText },
+  { label: 'My Handwriting', href: '/student/handwriting', icon: DashboardIcons.FileText },
   { label: 'Grades', href: '/student/grades', icon: DashboardIcons.CheckCircle },
 ];
 

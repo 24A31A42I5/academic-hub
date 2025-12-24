@@ -172,7 +172,7 @@ const FacultyDashboard = () => {
                         <div>
                           <h4 className="font-medium">{assignment.title}</h4>
                           <p className="text-sm text-muted-foreground">
-                            {assignment.year}Y - {assignment.branch} - Section {assignment.section}
+                            Year {assignment.year} - Sem {assignment.semester || 'I'} - {assignment.branch} - Section {assignment.section}
                           </p>
                         </div>
                         <Badge variant={new Date(assignment.deadline) < new Date() ? 'destructive' : 'outline'}>
