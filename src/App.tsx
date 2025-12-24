@@ -17,6 +17,10 @@ import FacultyAssignments from "./pages/faculty/FacultyAssignments";
 import FacultySubmissions from "./pages/faculty/FacultySubmissions";
 import FacultyReviews from "./pages/faculty/FacultyReviews";
 import StudentDashboard from "./pages/student/StudentDashboard";
+import StudentAssignments from "./pages/student/StudentAssignments";
+import StudentSubmissions from "./pages/student/StudentSubmissions";
+import StudentGrades from "./pages/student/StudentGrades";
+import StudentHandwriting from "./pages/student/StudentHandwriting";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -42,6 +46,10 @@ const App = () => (
             <Route path="/faculty/submissions" element={<FacultySubmissions />} />
             <Route path="/faculty/reviews" element={<FacultyReviews />} />
             <Route path="/student" element={<StudentDashboard />} />
+            <Route path="/student/assignments" element={<StudentAssignments />} />
+            <Route path="/student/submissions" element={<StudentSubmissions />} />
+            <Route path="/student/grades" element={<StudentGrades />} />
+            <Route path="/student/handwriting" element={<StudentHandwriting />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -156,6 +156,8 @@ export type Database = {
         Row: {
           branch: string
           created_at: string
+          handwriting_submitted_at: string | null
+          handwriting_url: string | null
           has_logged_in: boolean | null
           id: string
           profile_id: string
@@ -167,6 +169,8 @@ export type Database = {
         Insert: {
           branch: string
           created_at?: string
+          handwriting_submitted_at?: string | null
+          handwriting_url?: string | null
           has_logged_in?: boolean | null
           id?: string
           profile_id: string
@@ -178,6 +182,8 @@ export type Database = {
         Update: {
           branch?: string
           created_at?: string
+          handwriting_submitted_at?: string | null
+          handwriting_url?: string | null
           has_logged_in?: boolean | null
           id?: string
           profile_id?: string

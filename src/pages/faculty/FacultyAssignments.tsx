@@ -38,6 +38,7 @@ interface Assignment {
   year: number;
   branch: string;
   section: string;
+  semester?: string;
   deadline: string;
   allowed_formats: string[] | null;
   created_at: string;
@@ -218,7 +219,7 @@ const FacultyAssignments = () => {
                       </p>
                       <div className="flex flex-wrap gap-4 text-sm">
                         <Badge variant="outline">
-                          Year {assignment.year} - {assignment.branch} - Section {assignment.section}
+                          Year {assignment.year} - Sem {assignment.semester || 'I'} - {assignment.branch} - Section {assignment.section}
                         </Badge>
                         <span className="flex items-center gap-1 text-muted-foreground">
                           <Calendar className="w-4 h-4" />

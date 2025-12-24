@@ -287,7 +287,7 @@ const FacultySubmissions = () => {
                       <div>
                         <p className="font-medium">{submission.assignment?.title}</p>
                         <p className="text-xs text-muted-foreground">
-                          {submission.assignment?.year}Y - {submission.assignment?.branch} - {submission.assignment?.section}
+                          Year {submission.assignment?.year} - Sem {(submission.assignment as any)?.semester || 'I'} - {submission.assignment?.branch} - {submission.assignment?.section}
                         </p>
                       </div>
                     </TableCell>
