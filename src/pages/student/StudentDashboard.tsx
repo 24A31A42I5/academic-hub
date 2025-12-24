@@ -145,7 +145,7 @@ const StudentDashboard = () => {
               <div>
                 <h2 className="text-xl font-bold mb-1">Welcome, {profile.full_name}!</h2>
                 <p className="text-muted-foreground">
-                  {studentDetails.branch} • Year {studentDetails.year} • Section {studentDetails.section}
+                  {studentDetails.branch} • Year {studentDetails.year} • Semester {studentDetails.semester} • Section {studentDetails.section}
                 </p>
                 <p className="text-sm text-muted-foreground">Roll: {studentDetails.roll_number}</p>
               </div>
