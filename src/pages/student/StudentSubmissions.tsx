@@ -7,7 +7,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, FileText, ExternalLink, Clock, CheckCircle } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 
 const navItems = [
@@ -27,6 +28,8 @@ interface Submission {
   feedback: string | null;
   is_late: boolean | null;
   submitted_at: string;
+  verified_at: string | null;
+  ai_risk_level: string | null;
   assignment: {
     id: string;
     title: string;
@@ -72,6 +75,8 @@ const StudentSubmissions = () => {
               feedback,
               is_late,
               submitted_at,
+              verified_at,
+              ai_risk_level,
               assignment:assignments (
                 id,
                 title,
@@ -98,6 +103,90 @@ const StudentSubmissions = () => {
       fetchData();
     }
   }, [profile]);
+
+  const getVerificationBadge = (submission: Submission) => {
+    if (!submission.verified_at) {
+      return (
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge variant="outline" className="gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Verifying
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Handwriting verification in progress</p>
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    switch (submission.ai_risk_level) {
+      case 'low':
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge className="bg-green-500/10 text-green-600 gap-1">
+                <CheckCircle className="w-3 h-3" />
+                Verified
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Handwriting matches your reference sample</p>
+            </TooltipContent>
+          </Tooltip>
+        );
+      case 'medium':
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge className="bg-warning/10 text-warning gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Under Review
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Your submission is being reviewed</p>
+            </TooltipContent>
+          </Tooltip>
+        );
+      case 'high':
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge variant="destructive" className="gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Flagged
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Your submission has been flagged for review</p>
+            </TooltipContent>
+          </Tooltip>
+        );
+      case 'unverified':
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge variant="outline" className="gap-1">
+                <Shield className="w-3 h-3" />
+                No Sample
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Upload your handwriting sample to enable verification</p>
+            </TooltipContent>
+          </Tooltip>
+        );
+      default:
+        return (
+          <Badge variant="outline" className="gap-1">
+            <Shield className="w-3 h-3" />
+            Pending
+          </Badge>
+        );
+    }
+  };
 
   if (authLoading || loading) {
     return (
@@ -135,6 +224,7 @@ const StudentSubmissions = () => {
                   <TableHead>Assignment</TableHead>
                   <TableHead>Submitted</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Verification</TableHead>
                   <TableHead>Marks</TableHead>
                   <TableHead>Feedback</TableHead>
                   <TableHead className="text-right">File</TableHead>
@@ -167,6 +257,9 @@ const StudentSubmissions = () => {
                         {submission.status === 'graded' && <CheckCircle className="w-3 h-3 mr-1" />}
                         {submission.status || 'Pending'}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {getVerificationBadge(submission)}
                     </TableCell>
                     <TableCell>
                       {submission.marks !== null ? (
