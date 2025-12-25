@@ -129,7 +129,7 @@ const FacultyAssignments = () => {
 
     setCreating(true);
     try {
-      const { error } = await supabase.from('assignments').insert({
+      const { data: newAssignment, error } = await supabase.from('assignments').insert({
         title: form.title,
         description: form.description || null,
         year: selectedSection.year,
@@ -138,9 +138,40 @@ const FacultyAssignments = () => {
         deadline: new Date(form.deadline).toISOString(),
         allowed_formats: form.formats,
         faculty_profile_id: profile!.id,
-      });
+      }).select().single();
 
       if (error) throw error;
+
+      // Get student emails for the section to notify them
+      try {
+        const { data: students } = await supabase
+          .from('profiles')
+          .select(`email, student_details!inner(year, branch, section)`)
+          .eq('role', 'student')
+          .eq('student_details.year', selectedSection.year)
+          .eq('student_details.branch', selectedSection.branch)
+          .eq('student_details.section', selectedSection.section);
+
+        if (students && students.length > 0) {
+          const studentEmails = students.map(s => s.email);
+          await supabase.functions.invoke('send-notification', {
+            body: {
+              type: 'new_assignment',
+              data: {
+                studentEmails,
+                assignmentTitle: form.title,
+                deadline: new Date(form.deadline).toISOString(),
+                year: selectedSection.year,
+                branch: selectedSection.branch,
+                section: selectedSection.section,
+              },
+            },
+          });
+        }
+      } catch (emailError) {
+        console.error('Error sending notifications:', emailError);
+        // Don't fail the assignment creation if email fails
+      }
 
       toast.success('Assignment created successfully');
       setShowCreate(false);
