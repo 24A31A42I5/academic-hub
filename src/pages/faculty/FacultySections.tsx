@@ -23,6 +23,7 @@ interface Section {
   year: number;
   branch: string;
   section: string;
+  semester: string;
 }
 
 interface Student {
@@ -34,6 +35,7 @@ interface Student {
 }
 
 const BRANCHES = ['CSE', 'AIML', 'AI', 'DS', 'IT', 'ECE', 'EEE', 'MECH', 'CIVIL'];
+const SEMESTERS = ['I', 'II'];
 
 const FacultySections = () => {
   const { profile, loading: authLoading } = useAuth();
@@ -42,6 +44,7 @@ const FacultySections = () => {
   const [studentsMap, setStudentsMap] = useState<Record<string, Student[]>>({});
   const [loading, setLoading] = useState(true);
   const [filterBranch, setFilterBranch] = useState<string>('all');
+  const [filterSemester, setFilterSemester] = useState<string>('all');
 
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'faculty')) {
@@ -56,7 +59,7 @@ const FacultySections = () => {
       try {
         const { data: sectionsData, error } = await supabase
           .from('faculty_sections')
-          .select('id, year, branch, section')
+          .select('id, year, branch, section, semester')
           .eq('faculty_profile_id', profile.id)
           .order('year', { ascending: true });
 
@@ -85,7 +88,7 @@ const FacultySections = () => {
             .eq('student_details.section', sec.section);
 
           return {
-            key: `${sec.year}-${sec.branch}-${sec.section}`,
+            key: `${sec.year}-${sec.semester || 'I'}-${sec.branch}-${sec.section}`,
             students: (data || []).map((s: any) => ({
               id: s.id,
               full_name: s.full_name,
@@ -165,11 +168,22 @@ const FacultySections = () => {
             </Card>
           </div>
 
-          {/* Branch Filter */}
+          {/* Filters */}
           <Card className="mb-4">
             <CardContent className="pt-6">
-              <div className="flex items-center gap-4">
-                <span className="text-sm font-medium">Filter by Branch:</span>
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="text-sm font-medium">Filters:</span>
+                <Select value={filterSemester} onValueChange={setFilterSemester}>
+                  <SelectTrigger className="w-[130px]">
+                    <SelectValue placeholder="Semester" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sems</SelectItem>
+                    {SEMESTERS.map((s) => (
+                      <SelectItem key={s} value={s}>Sem {s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Select value={filterBranch} onValueChange={setFilterBranch}>
                   <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="Branch" />
@@ -186,8 +200,11 @@ const FacultySections = () => {
           </Card>
 
           <Accordion type="multiple" className="space-y-4">
-            {sections.filter(s => filterBranch === 'all' || s.branch === filterBranch).map((section) => {
-              const key = `${section.year}-${section.branch}-${section.section}`;
+            {sections
+              .filter(s => filterBranch === 'all' || s.branch === filterBranch)
+              .filter(s => filterSemester === 'all' || s.semester === filterSemester)
+              .map((section) => {
+              const key = `${section.year}-${section.semester || 'I'}-${section.branch}-${section.section}`;
               const students = studentsMap[key] || [];
 
               return (
@@ -196,6 +213,9 @@ const FacultySections = () => {
                     <div className="flex items-center gap-4">
                       <Badge variant="outline" className="text-faculty border-faculty">
                         Year {section.year}
+                      </Badge>
+                      <Badge variant="outline">
+                        Sem {section.semester || 'I'}
                       </Badge>
                       <span className="font-medium">{section.branch} - Section {section.section}</span>
                       <Badge variant="secondary">{students.length} students</Badge>

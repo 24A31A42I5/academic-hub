@@ -25,6 +25,7 @@ const navItems = [
 const BRANCHES = ['CSE', 'AIML', 'AI', 'DS', 'IT', 'ECE', 'EEE', 'MECH', 'CIVIL'];
 const YEARS = [1, 2, 3, 4];
 const SECTIONS = ['A', 'B', 'C'];
+const SEMESTERS = ['I', 'II'];
 
 interface FacultyProfile {
   id: string;
@@ -38,6 +39,7 @@ interface FacultySection {
   year: number;
   branch: string;
   section: string;
+  semester: string;
   created_at: string;
   profiles: FacultyProfile | null;
 }
@@ -55,6 +57,13 @@ const SectionMappingPage = () => {
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('');
   const [selectedSection, setSelectedSection] = useState('');
+  const [selectedSemester, setSelectedSemester] = useState('');
+  
+  // Filters
+  const [filterYear, setFilterYear] = useState<string>('all');
+  const [filterBranch, setFilterBranch] = useState<string>('all');
+  const [filterSection, setFilterSection] = useState<string>('all');
+  const [filterSemester, setFilterSemester] = useState<string>('all');
 
   const fetchData = useCallback(async () => {
     try {
@@ -79,6 +88,7 @@ const SectionMappingPage = () => {
           year,
           branch,
           section,
+          semester,
           created_at,
           profiles:faculty_profile_id (
             id,
@@ -107,7 +117,7 @@ const SectionMappingPage = () => {
   }, [profile, fetchData]);
 
   const handleAddMapping = async () => {
-    if (!selectedFaculty || !selectedYear || !selectedBranch || !selectedSection) {
+    if (!selectedFaculty || !selectedYear || !selectedBranch || !selectedSection || !selectedSemester) {
       toast.error('Please fill all fields');
       return;
     }
@@ -117,7 +127,8 @@ const SectionMappingPage = () => {
       m => m.faculty_profile_id === selectedFaculty &&
            m.year === parseInt(selectedYear) &&
            m.branch === selectedBranch &&
-           m.section === selectedSection
+           m.section === selectedSection &&
+           m.semester === selectedSemester
     );
 
     if (exists) {
@@ -134,6 +145,7 @@ const SectionMappingPage = () => {
           year: parseInt(selectedYear),
           branch: selectedBranch,
           section: selectedSection,
+          semester: selectedSemester,
         });
 
       if (error) throw error;
@@ -143,6 +155,7 @@ const SectionMappingPage = () => {
       setSelectedYear('');
       setSelectedBranch('');
       setSelectedSection('');
+      setSelectedSemester('');
       fetchData();
     } catch (error) {
       logger.error('Error adding mapping', error);
@@ -184,6 +197,15 @@ const SectionMappingPage = () => {
     return null;
   }
 
+  // Filter mappings
+  const filteredMappings = mappings.filter((m) => {
+    const matchesYear = filterYear === 'all' || m.year.toString() === filterYear;
+    const matchesBranch = filterBranch === 'all' || m.branch === filterBranch;
+    const matchesSection = filterSection === 'all' || m.section === filterSection;
+    const matchesSemester = filterSemester === 'all' || m.semester === filterSemester;
+    return matchesYear && matchesBranch && matchesSection && matchesSemester;
+  });
+
   return (
     <DashboardLayout title="Section Mapping" role="admin" navItems={navItems}>
       {/* Stats */}
@@ -224,7 +246,7 @@ const SectionMappingPage = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
             <div>
               <Label>Faculty</Label>
               <Select value={selectedFaculty} onValueChange={setSelectedFaculty}>
@@ -285,6 +307,21 @@ const SectionMappingPage = () => {
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <Label>Semester</Label>
+              <Select value={selectedSemester} onValueChange={setSelectedSemester}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Semester" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SEMESTERS.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      Sem {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex items-end">
               <Button onClick={handleAddMapping} disabled={saving} className="w-full">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
@@ -302,6 +339,54 @@ const SectionMappingPage = () => {
           <CardDescription>View and manage faculty-section assignments</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Filters */}
+          <div className="flex flex-wrap gap-4 mb-4">
+            <Select value={filterYear} onValueChange={setFilterYear}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Years</SelectItem>
+                {YEARS.map((y) => (
+                  <SelectItem key={y} value={y.toString()}>Year {y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterSemester} onValueChange={setFilterSemester}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Semester" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sems</SelectItem>
+                {SEMESTERS.map((s) => (
+                  <SelectItem key={s} value={s}>Sem {s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterBranch} onValueChange={setFilterBranch}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {BRANCHES.map((b) => (
+                  <SelectItem key={b} value={b}>{b}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterSection} onValueChange={setFilterSection}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue placeholder="Section" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sections</SelectItem>
+                {SECTIONS.map((s) => (
+                  <SelectItem key={s} value={s}>Section {s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          
           <div className="rounded-lg border overflow-hidden">
             <Table>
               <TableHeader>
@@ -309,6 +394,7 @@ const SectionMappingPage = () => {
                   <TableHead>Faculty</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Year</TableHead>
+                  <TableHead>Semester</TableHead>
                   <TableHead>Branch</TableHead>
                   <TableHead>Section</TableHead>
                   <TableHead>Created</TableHead>
@@ -316,18 +402,19 @@ const SectionMappingPage = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {mappings.length === 0 ? (
+                {filteredMappings.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                       No mappings found. Add a faculty-section assignment above.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  mappings.map((m) => (
+                  filteredMappings.map((m) => (
                     <TableRow key={m.id}>
                       <TableCell className="font-medium">{m.profiles?.full_name || '-'}</TableCell>
                       <TableCell>{m.profiles?.email || '-'}</TableCell>
                       <TableCell><Badge variant="outline">Year {m.year}</Badge></TableCell>
+                      <TableCell><Badge variant="outline">Sem {m.semester || 'I'}</Badge></TableCell>
                       <TableCell><Badge>{m.branch}</Badge></TableCell>
                       <TableCell><Badge variant="secondary">{m.section}</Badge></TableCell>
                       <TableCell className="text-muted-foreground">
@@ -343,8 +430,8 @@ const SectionMappingPage = () => {
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>Remove Mapping</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Remove {m.profiles?.full_name} from Year {m.year} {m.branch} Section {m.section}?
+                            <AlertDialogDescription>
+                                Remove {m.profiles?.full_name} from Year {m.year} Sem {m.semester || 'I'} {m.branch} Section {m.section}?
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, FileText, AlertTriangle, Clock, CheckCircle, ExternalLink, Search, Users } from 'lucide-react';
+import { Loader2, FileText, AlertTriangle, Clock, CheckCircle, ExternalLink, Search, Users, Mail } from 'lucide-react';
 import { format } from 'date-fns';
 
 const navItems = [
@@ -78,7 +78,8 @@ const FacultySubmissions = () => {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterAssignment, setFilterAssignment] = useState<string>(searchParams.get('assignment') || 'all');
+  const assignmentFromUrl = searchParams.get('assignment');
+  const [filterAssignment, setFilterAssignment] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterYear, setFilterYear] = useState<string>('all');
   const [filterSemester, setFilterSemester] = useState<string>('all');
@@ -194,7 +195,17 @@ const FacultySubmissions = () => {
     }
   }, [profile]);
 
-  const handleGrade = async () => {
+  // Set assignment filter from URL after assignments are loaded
+  useEffect(() => {
+    if (assignmentFromUrl && assignments.length > 0) {
+      const found = assignments.find(a => a.id === assignmentFromUrl);
+      if (found) {
+        setFilterAssignment(assignmentFromUrl);
+      }
+    }
+  }, [assignmentFromUrl, assignments]);
+
+  const handleGrade = async (sendEmail: boolean = false) => {
     if (!gradeSubmission) return;
 
     setSaving(true);
@@ -210,7 +221,30 @@ const FacultySubmissions = () => {
 
       if (error) throw error;
 
-      toast.success('Submission graded successfully');
+      // Send email notification if requested
+      if (sendEmail && gradeSubmission.student_profile?.email) {
+        try {
+          await supabase.functions.invoke('send-notification', {
+            body: {
+              type: 'assignment_graded',
+              data: {
+                studentEmail: gradeSubmission.student_profile.email,
+                studentName: gradeSubmission.student_profile.full_name,
+                assignmentTitle: gradeSubmission.assignment?.title,
+                marks: gradeForm.marks ? parseFloat(gradeForm.marks) : undefined,
+                feedback: gradeForm.feedback || undefined,
+              },
+            },
+          });
+          toast.success('Submission graded and notification sent');
+        } catch (emailError) {
+          console.error('Error sending email:', emailError);
+          toast.success('Submission graded (email notification failed)');
+        }
+      } else {
+        toast.success('Submission graded successfully');
+      }
+
       setGradeSubmission(null);
       setGradeForm({ marks: '', feedback: '', status: 'graded' });
       fetchData();
@@ -601,13 +635,17 @@ const FacultySubmissions = () => {
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setGradeSubmission(null)}>
               Cancel
             </Button>
-            <Button variant="faculty" onClick={handleGrade} disabled={saving}>
+            <Button variant="outline" onClick={() => handleGrade(false)} disabled={saving}>
               {saving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-              Save Grade
+              Save Only
+            </Button>
+            <Button variant="faculty" onClick={() => handleGrade(true)} disabled={saving}>
+              {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />}
+              Save & Notify
             </Button>
           </DialogFooter>
         </DialogContent>

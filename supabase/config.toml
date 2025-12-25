@@ -1,1 +1,10 @@
 project_id = "dgbjcjcxdiyugbcbkrpp"
+
+[functions.send-notification]
+verify_jwt = true
+
+[functions.bulk-create-faculty]
+verify_jwt = true
+
+[functions.bulk-create-students]
+verify_jwt = true
