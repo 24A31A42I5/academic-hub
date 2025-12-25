@@ -11,6 +11,7 @@ import StudentsPage from "./pages/admin/StudentsPage";
 import FacultyPage from "./pages/admin/FacultyPage";
 import SectionMappingPage from "./pages/admin/SectionMappingPage";
 import AssignmentsPage from "./pages/admin/AssignmentsPage";
+import HandwritingPage from "./pages/admin/HandwritingPage";
 import FacultyDashboard from "./pages/faculty/FacultyDashboard";
 import FacultySections from "./pages/faculty/FacultySections";
 import FacultyAssignments from "./pages/faculty/FacultyAssignments";
@@ -18,6 +19,7 @@ import FacultySubmissions from "./pages/faculty/FacultySubmissions";
 import FacultyReviews from "./pages/faculty/FacultyReviews";
 import StudentDashboard from "./pages/student/StudentDashboard";
 import StudentAssignments from "./pages/student/StudentAssignments";
+import SubmitAssignment from "./pages/student/SubmitAssignment";
 import StudentSubmissions from "./pages/student/StudentSubmissions";
 import StudentGrades from "./pages/student/StudentGrades";
 import StudentHandwriting from "./pages/student/StudentHandwriting";
@@ -40,6 +42,7 @@ const App = () => (
             <Route path="/admin/faculty" element={<FacultyPage />} />
             <Route path="/admin/sections" element={<SectionMappingPage />} />
             <Route path="/admin/assignments" element={<AssignmentsPage />} />
+            <Route path="/admin/handwriting" element={<HandwritingPage />} />
             <Route path="/faculty" element={<FacultyDashboard />} />
             <Route path="/faculty/sections" element={<FacultySections />} />
             <Route path="/faculty/assignments" element={<FacultyAssignments />} />
@@ -47,6 +50,7 @@ const App = () => (
             <Route path="/faculty/reviews" element={<FacultyReviews />} />
             <Route path="/student" element={<StudentDashboard />} />
             <Route path="/student/assignments" element={<StudentAssignments />} />
+            <Route path="/student/assignments/:assignmentId" element={<SubmitAssignment />} />
             <Route path="/student/submissions" element={<StudentSubmissions />} />
             <Route path="/student/grades" element={<StudentGrades />} />
             <Route path="/student/handwriting" element={<StudentHandwriting />} />

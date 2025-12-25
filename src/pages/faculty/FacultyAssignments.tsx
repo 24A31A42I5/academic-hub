@@ -43,6 +43,7 @@ interface Assignment {
   allowed_formats: string[] | null;
   created_at: string;
   submissions: { id: string; status: string; ai_risk_level: string }[];
+  student_count?: number;
 }
 
 const FacultyAssignments = () => {
@@ -87,7 +88,21 @@ const FacultyAssignments = () => {
       if (assignmentsRes.error) throw assignmentsRes.error;
       if (sectionsRes.error) throw sectionsRes.error;
 
-      setAssignments(assignmentsRes.data || []);
+      // Get student counts for each section
+      const assignmentsWithCounts = await Promise.all(
+        (assignmentsRes.data || []).map(async (assignment) => {
+          const { count } = await supabase
+            .from('student_details')
+            .select('*', { count: 'exact', head: true })
+            .eq('year', assignment.year)
+            .eq('branch', assignment.branch)
+            .eq('section', assignment.section);
+          
+          return { ...assignment, student_count: count || 0 };
+        })
+      );
+
+      setAssignments(assignmentsWithCounts);
       setSections(sectionsRes.data || []);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -198,6 +213,7 @@ const FacultyAssignments = () => {
         <div className="grid gap-4">
           {assignments.map((assignment) => {
             const submissionCount = assignment.submissions?.length || 0;
+            const studentCount = assignment.student_count || 0;
             const flaggedCount = assignment.submissions?.filter(
               (s) => ['high', 'medium'].includes(s.ai_risk_level)
             ).length || 0;
@@ -225,10 +241,6 @@ const FacultyAssignments = () => {
                           <Calendar className="w-4 h-4" />
                           Due: {format(new Date(assignment.deadline), 'MMM d, yyyy h:mm a')}
                         </span>
-                        <span className="flex items-center gap-1 text-muted-foreground">
-                          <FileText className="w-4 h-4" />
-                          {submissionCount} submissions
-                        </span>
                         {flaggedCount > 0 && (
                           <span className="flex items-center gap-1 text-warning">
                             <AlertTriangle className="w-4 h-4" />
@@ -237,34 +249,44 @@ const FacultyAssignments = () => {
                         )}
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Link to={`/faculty/submissions?assignment=${assignment.id}`}>
-                        <Button variant="outline" size="sm">
-                          <FileText className="w-4 h-4 mr-1" />
-                          View Submissions
-                        </Button>
-                      </Link>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="text-destructive">
-                            <Trash2 className="w-4 h-4" />
+                    <div className="flex items-center gap-4">
+                      {/* Submission Count Display */}
+                      <div className="text-right">
+                        <div className="flex items-center gap-1 text-lg font-semibold">
+                          <FileText className="w-5 h-5 text-muted-foreground" />
+                          <span className={submissionCount === studentCount ? 'text-green-600' : ''}>{submissionCount}/{studentCount}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">submissions</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Link to={`/faculty/submissions?assignment=${assignment.id}`}>
+                          <Button variant="outline" size="sm">
+                            <FileText className="w-4 h-4 mr-1" />
+                            View
                           </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete Assignment</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will permanently delete this assignment and all its submissions.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDelete(assignment.id)}>
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                        </Link>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="text-destructive">
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete Assignment</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently delete this assignment and all its submissions.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDelete(assignment.id)}>
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
