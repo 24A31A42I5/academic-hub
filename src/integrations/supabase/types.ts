@@ -207,6 +207,7 @@ export type Database = {
       }
       submissions: {
         Row: {
+          ai_analysis_details: Json | null
           ai_confidence_score: number | null
           ai_flagged_sections: string[] | null
           ai_risk_level: string | null
@@ -222,8 +223,10 @@ export type Database = {
           status: string | null
           student_profile_id: string
           submitted_at: string
+          verified_at: string | null
         }
         Insert: {
+          ai_analysis_details?: Json | null
           ai_confidence_score?: number | null
           ai_flagged_sections?: string[] | null
           ai_risk_level?: string | null
@@ -239,8 +242,10 @@ export type Database = {
           status?: string | null
           student_profile_id: string
           submitted_at?: string
+          verified_at?: string | null
         }
         Update: {
+          ai_analysis_details?: Json | null
           ai_confidence_score?: number | null
           ai_flagged_sections?: string[] | null
           ai_risk_level?: string | null
@@ -256,6 +261,7 @@ export type Database = {
           status?: string | null
           student_profile_id?: string
           submitted_at?: string
+          verified_at?: string | null
         }
         Relationships: [
           {

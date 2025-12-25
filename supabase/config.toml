@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.bulk-create-students]
 verify_jwt = true
+
+[functions.verify-handwriting]
+verify_jwt = false

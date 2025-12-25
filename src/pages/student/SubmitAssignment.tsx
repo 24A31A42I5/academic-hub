@@ -119,7 +119,7 @@ const SubmitAssignment = () => {
       const fileName = `${user.id}/${assignment.id}/${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
-        .from('submissions')
+        .from('uploads')
         .upload(fileName, selectedFile, {
           cacheControl: '3600',
           upsert: true,
@@ -129,11 +129,13 @@ const SubmitAssignment = () => {
 
       // Get public URL
       const { data: { publicUrl } } = supabase.storage
-        .from('submissions')
+        .from('uploads')
         .getPublicUrl(fileName);
 
       // Check if deadline passed
       const isLate = isPast(new Date(assignment.deadline));
+
+      let submissionId: string;
 
       // Create or update submission
       if (existingSubmission) {
@@ -145,12 +147,19 @@ const SubmitAssignment = () => {
             submitted_at: new Date().toISOString(),
             is_late: isLate,
             status: 'pending',
+            // Reset AI verification for re-submissions
+            ai_similarity_score: null,
+            ai_confidence_score: null,
+            ai_risk_level: null,
+            ai_flagged_sections: null,
+            verified_at: null,
           })
           .eq('id', existingSubmission.id);
 
         if (error) throw error;
+        submissionId = existingSubmission.id;
       } else {
-        const { error } = await supabase
+        const { data: newSubmission, error } = await supabase
           .from('submissions')
           .insert({
             assignment_id: assignment.id,
@@ -159,12 +168,34 @@ const SubmitAssignment = () => {
             file_type: selectedFile.type,
             is_late: isLate,
             status: 'pending',
-          });
+          })
+          .select('id')
+          .single();
 
         if (error) throw error;
+        submissionId = newSubmission.id;
       }
 
-      toast.success('Assignment submitted successfully');
+      // Trigger AI handwriting verification (non-blocking)
+      toast.success('Assignment submitted! Verifying handwriting...');
+      
+      supabase.functions.invoke('verify-handwriting', {
+        body: {
+          submission_id: submissionId,
+          file_url: publicUrl,
+          file_type: selectedFile.type,
+          student_profile_id: profile.id,
+        },
+      }).then(({ error }) => {
+        if (error) {
+          console.error('Verification error:', error);
+        } else {
+          console.log('Handwriting verification completed');
+        }
+      }).catch((err) => {
+        console.error('Verification failed:', err);
+      });
+
       navigate('/student/submissions');
     } catch (error: any) {
       console.error('Error submitting assignment:', error);

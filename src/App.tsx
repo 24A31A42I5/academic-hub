@@ -12,6 +12,7 @@ import FacultyPage from "./pages/admin/FacultyPage";
 import SectionMappingPage from "./pages/admin/SectionMappingPage";
 import AssignmentsPage from "./pages/admin/AssignmentsPage";
 import HandwritingPage from "./pages/admin/HandwritingPage";
+import VerificationReportsPage from "./pages/admin/VerificationReportsPage";
 import FacultyDashboard from "./pages/faculty/FacultyDashboard";
 import FacultySections from "./pages/faculty/FacultySections";
 import FacultyAssignments from "./pages/faculty/FacultyAssignments";
@@ -43,6 +44,7 @@ const App = () => (
             <Route path="/admin/sections" element={<SectionMappingPage />} />
             <Route path="/admin/assignments" element={<AssignmentsPage />} />
             <Route path="/admin/handwriting" element={<HandwritingPage />} />
+            <Route path="/admin/verification-reports" element={<VerificationReportsPage />} />
             <Route path="/faculty" element={<FacultyDashboard />} />
             <Route path="/faculty/sections" element={<FacultySections />} />
             <Route path="/faculty/assignments" element={<FacultyAssignments />} />
