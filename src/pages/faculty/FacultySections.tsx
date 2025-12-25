@@ -6,6 +6,7 @@ import { DashboardLayout, DashboardIcons } from '@/components/dashboard/Dashboar
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Users, GraduationCap } from 'lucide-react';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 
@@ -32,12 +33,15 @@ interface Student {
   has_logged_in: boolean;
 }
 
+const BRANCHES = ['CSE', 'AIML', 'AI', 'DS', 'IT', 'ECE', 'EEE', 'MECH', 'CIVIL'];
+
 const FacultySections = () => {
   const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [sections, setSections] = useState<Section[]>([]);
   const [studentsMap, setStudentsMap] = useState<Record<string, Student[]>>({});
   const [loading, setLoading] = useState(true);
+  const [filterBranch, setFilterBranch] = useState<string>('all');
 
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'faculty')) {
@@ -161,8 +165,28 @@ const FacultySections = () => {
             </Card>
           </div>
 
+          {/* Branch Filter */}
+          <Card className="mb-4">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium">Filter by Branch:</span>
+                <Select value={filterBranch} onValueChange={setFilterBranch}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Branch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Branches</SelectItem>
+                    {BRANCHES.map((b) => (
+                      <SelectItem key={b} value={b}>{b}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
           <Accordion type="multiple" className="space-y-4">
-            {sections.map((section) => {
+            {sections.filter(s => filterBranch === 'all' || s.branch === filterBranch).map((section) => {
               const key = `${section.year}-${section.branch}-${section.section}`;
               const students = studentsMap[key] || [];
 

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, FileText, AlertTriangle, Clock, CheckCircle, ExternalLink, Search } from 'lucide-react';
+import { Loader2, FileText, AlertTriangle, Clock, CheckCircle, ExternalLink, Search, Users } from 'lucide-react';
 import { format } from 'date-fns';
 
 const navItems = [
@@ -23,6 +23,19 @@ const navItems = [
   { label: 'Submissions', href: '/faculty/submissions', icon: DashboardIcons.FileText },
   { label: 'AI Reviews', href: '/faculty/reviews', icon: DashboardIcons.AlertTriangle },
 ];
+
+const BRANCHES = ['CSE', 'AIML', 'AI', 'DS', 'IT', 'ECE', 'EEE', 'MECH', 'CIVIL'];
+const YEARS = [1, 2, 3, 4];
+const SECTIONS = ['A', 'B', 'C'];
+const SEMESTERS = ['I', 'II'];
+
+interface StudentDetails {
+  roll_number: string;
+  year: number;
+  branch: string;
+  section: string;
+  semester: string;
+}
 
 interface Submission {
   id: string;
@@ -40,6 +53,7 @@ interface Submission {
     id: string;
     full_name: string;
     email: string;
+    student_details?: StudentDetails[];
   };
   assignment: {
     id: string;
@@ -60,11 +74,17 @@ const FacultySubmissions = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [allStudents, setAllStudents] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAssignment, setFilterAssignment] = useState<string>(searchParams.get('assignment') || 'all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterYear, setFilterYear] = useState<string>('all');
+  const [filterSemester, setFilterSemester] = useState<string>('all');
+  const [filterBranch, setFilterBranch] = useState<string>('all');
+  const [filterSection, setFilterSection] = useState<string>('all');
+  const [filterSubmitted, setFilterSubmitted] = useState<string>('all');
   
   const [gradeSubmission, setGradeSubmission] = useState<Submission | null>(null);
   const [gradeForm, setGradeForm] = useState({ marks: '', feedback: '', status: 'graded' });
@@ -80,7 +100,7 @@ const FacultySubmissions = () => {
     if (!profile) return;
 
     try {
-      const [submissionsRes, assignmentsRes] = await Promise.all([
+      const [submissionsRes, assignmentsRes, sectionsRes] = await Promise.all([
         supabase
           .from('submissions')
           .select(`
@@ -98,7 +118,14 @@ const FacultySubmissions = () => {
             student_profile:profiles!submissions_student_profile_id_fkey (
               id,
               full_name,
-              email
+              email,
+              student_details (
+                roll_number,
+                year,
+                branch,
+                section,
+                semester
+              )
             ),
             assignment:assignments!inner (
               id,
@@ -115,6 +142,10 @@ const FacultySubmissions = () => {
           .from('assignments')
           .select('id, title')
           .eq('faculty_profile_id', profile.id),
+        supabase
+          .from('faculty_sections')
+          .select('year, branch, section')
+          .eq('faculty_profile_id', profile.id),
       ]);
 
       if (submissionsRes.error) throw submissionsRes.error;
@@ -122,6 +153,33 @@ const FacultySubmissions = () => {
 
       setSubmissions(submissionsRes.data as unknown as Submission[] || []);
       setAssignments(assignmentsRes.data || []);
+
+      // Fetch all students in faculty's sections
+      if (sectionsRes.data) {
+        const studentsPromises = sectionsRes.data.map(async (sec) => {
+          const { data } = await supabase
+            .from('profiles')
+            .select(`
+              id,
+              full_name,
+              email,
+              student_details!inner (
+                roll_number,
+                year,
+                branch,
+                section,
+                semester
+              )
+            `)
+            .eq('role', 'student')
+            .eq('student_details.year', sec.year)
+            .eq('student_details.branch', sec.branch)
+            .eq('student_details.section', sec.section);
+          return data || [];
+        });
+        const studentsResults = await Promise.all(studentsPromises);
+        setAllStudents(studentsResults.flat());
+      }
     } catch (error) {
       console.error('Error fetching submissions:', error);
       toast.error('Failed to load submissions');
@@ -173,14 +231,62 @@ const FacultySubmissions = () => {
     });
   };
 
-  const filteredSubmissions = submissions.filter((sub) => {
+  // Get student details helper
+  const getStudentDetails = (sub: Submission): StudentDetails | null => {
+    const details = sub.student_profile?.student_details;
+    if (Array.isArray(details)) return details[0] || null;
+    return details || null;
+  };
+
+  // Build display data - combine submissions with all students for "not submitted" view
+  const getDisplayData = () => {
+    if (filterSubmitted === 'not_submitted' && filterAssignment !== 'all') {
+      // Get students who haven't submitted for selected assignment
+      const submittedStudentIds = new Set(
+        submissions
+          .filter(s => s.assignment.id === filterAssignment)
+          .map(s => s.student_profile?.id)
+      );
+      
+      return allStudents
+        .filter(student => !submittedStudentIds.has(student.id))
+        .map(student => ({
+          id: `not-submitted-${student.id}`,
+          student_profile: student,
+          assignment: assignments.find(a => a.id === filterAssignment),
+          status: null,
+          marks: null,
+          submitted_at: null,
+          is_late: null,
+          ai_risk_level: null,
+          file_url: null,
+          notSubmitted: true,
+        }));
+    }
+    return submissions;
+  };
+
+  const filteredData = getDisplayData().filter((item: any) => {
+    const sub = item as Submission;
+    const details = item.notSubmitted 
+      ? (item.student_profile?.student_details?.[0] || item.student_profile?.student_details)
+      : getStudentDetails(sub);
+    
     const matchesSearch =
-      sub.student_profile?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      sub.student_profile?.email?.toLowerCase().includes(searchTerm.toLowerCase());
+      item.student_profile?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.student_profile?.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      details?.roll_number?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesAssignment = filterAssignment === 'all' || sub.assignment?.id === filterAssignment;
     const matchesStatus = filterStatus === 'all' || sub.status === filterStatus;
+    const matchesYear = filterYear === 'all' || details?.year?.toString() === filterYear;
+    const matchesSemester = filterSemester === 'all' || details?.semester === filterSemester;
+    const matchesBranch = filterBranch === 'all' || details?.branch === filterBranch;
+    const matchesSection = filterSection === 'all' || details?.section === filterSection;
+    const matchesSubmitted = filterSubmitted === 'all' || 
+      (filterSubmitted === 'submitted' && !item.notSubmitted) ||
+      (filterSubmitted === 'not_submitted' && item.notSubmitted);
 
-    return matchesSearch && matchesAssignment && matchesStatus;
+    return matchesSearch && matchesAssignment && matchesStatus && matchesYear && matchesSemester && matchesBranch && matchesSection && matchesSubmitted;
   });
 
   const getRiskBadge = (level: string | null) => {
@@ -194,6 +300,12 @@ const FacultySubmissions = () => {
       default:
         return <Badge variant="outline">Not Analyzed</Badge>;
     }
+  };
+
+  const stats = {
+    total: submissions.length,
+    graded: submissions.filter(s => s.status === 'graded').length,
+    pending: submissions.filter(s => s.status === 'pending' || !s.status).length,
   };
 
   if (authLoading || loading) {
@@ -210,14 +322,55 @@ const FacultySubmissions = () => {
 
   return (
     <DashboardLayout title="Submissions" role="faculty" navItems={navItems}>
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <Card>
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="p-3 rounded-full bg-faculty/10">
+              <FileText className="w-6 h-6 text-faculty" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{stats.total}</p>
+              <p className="text-sm text-muted-foreground">Total Submissions</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="p-3 rounded-full bg-green-500/10">
+              <CheckCircle className="w-6 h-6 text-green-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{stats.graded}</p>
+              <p className="text-sm text-muted-foreground">Graded</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="p-3 rounded-full bg-orange-500/10">
+              <Clock className="w-6 h-6 text-orange-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{stats.pending}</p>
+              <p className="text-sm text-muted-foreground">Pending</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
       <Card className="mb-6">
-        <CardContent className="pt-6">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1">
+        <CardHeader>
+          <CardTitle>Filter Submissions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4">
+            <div className="flex-1 min-w-[200px]">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by student name or email..."
+                  placeholder="Search by name, email, roll number..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -225,20 +378,72 @@ const FacultySubmissions = () => {
               </div>
             </div>
             <Select value={filterAssignment} onValueChange={setFilterAssignment}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filter by assignment" />
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Assignment" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Assignments</SelectItem>
                 {assignments.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.title}
-                  </SelectItem>
+                  <SelectItem key={a.id} value={a.id}>{a.title}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <Select value={filterYear} onValueChange={setFilterYear}>
+              <SelectTrigger className="w-[100px]">
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Years</SelectItem>
+                {YEARS.map((y) => (
+                  <SelectItem key={y} value={y.toString()}>Year {y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterSemester} onValueChange={setFilterSemester}>
+              <SelectTrigger className="w-[100px]">
+                <SelectValue placeholder="Sem" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sems</SelectItem>
+                {SEMESTERS.map((s) => (
+                  <SelectItem key={s} value={s}>Sem {s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterBranch} onValueChange={setFilterBranch}>
+              <SelectTrigger className="w-[110px]">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {BRANCHES.map((b) => (
+                  <SelectItem key={b} value={b}>{b}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterSection} onValueChange={setFilterSection}>
+              <SelectTrigger className="w-[110px]">
+                <SelectValue placeholder="Section" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sections</SelectItem>
+                {SECTIONS.map((s) => (
+                  <SelectItem key={s} value={s}>Section {s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterSubmitted} onValueChange={setFilterSubmitted}>
               <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Submitted" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="submitted">Submitted</SelectItem>
+                <SelectItem value="not_submitted">Not Submitted</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="w-[120px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -252,89 +457,104 @@ const FacultySubmissions = () => {
         </CardContent>
       </Card>
 
-      {filteredSubmissions.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground">No submissions found</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="p-0">
+      {/* Submissions Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Submissions</CardTitle>
+          <CardDescription>{filteredData.length} record(s) found</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="rounded-lg border overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Roll No</TableHead>
                   <TableHead>Student</TableHead>
                   <TableHead>Assignment</TableHead>
+                  <TableHead>Year</TableHead>
+                  <TableHead>Sem</TableHead>
+                  <TableHead>Branch</TableHead>
+                  <TableHead>Section</TableHead>
                   <TableHead>Submitted</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>AI Risk</TableHead>
                   <TableHead>Marks</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredSubmissions.map((submission) => (
-                  <TableRow key={submission.id}>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{submission.student_profile?.full_name}</p>
-                        <p className="text-sm text-muted-foreground">{submission.student_profile?.email}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{submission.assignment?.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Year {submission.assignment?.year} - Sem {(submission.assignment as any)?.semester || 'I'} - {submission.assignment?.branch} - {submission.assignment?.section}
-                        </p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">
-                          {format(new Date(submission.submitted_at), 'MMM d, h:mm a')}
-                        </span>
-                        {submission.is_late && (
-                          <Badge variant="destructive" className="text-xs">Late</Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={submission.status === 'graded' ? 'default' : 'outline'}>
-                        {submission.status === 'pending' && <Clock className="w-3 h-3 mr-1" />}
-                        {submission.status === 'graded' && <CheckCircle className="w-3 h-3 mr-1" />}
-                        {submission.status || 'Pending'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{getRiskBadge(submission.ai_risk_level)}</TableCell>
-                    <TableCell>
-                      {submission.marks !== null ? (
-                        <span className="font-medium">{submission.marks}</span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="sm" asChild>
-                          <a href={submission.file_url} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink className="w-4 h-4" />
-                          </a>
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => openGradeDialog(submission)}>
-                          Grade
-                        </Button>
-                      </div>
+                {filteredData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                      No records found
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  filteredData.map((item: any) => {
+                    const details = item.notSubmitted 
+                      ? (item.student_profile?.student_details?.[0] || item.student_profile?.student_details)
+                      : getStudentDetails(item as Submission);
+                    
+                    return (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-mono">{details?.roll_number || '-'}</TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{item.student_profile?.full_name}</p>
+                            <p className="text-xs text-muted-foreground">{item.student_profile?.email}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>{item.assignment?.title || '-'}</TableCell>
+                        <TableCell>{details?.year || '-'}</TableCell>
+                        <TableCell>{details?.semester || '-'}</TableCell>
+                        <TableCell>{details?.branch || '-'}</TableCell>
+                        <TableCell>{details?.section || '-'}</TableCell>
+                        <TableCell>
+                          {item.notSubmitted ? (
+                            <Badge variant="destructive">Not Submitted</Badge>
+                          ) : item.submitted_at ? (
+                            <div className="flex items-center gap-2">
+                              <Badge className="bg-green-500/10 text-green-600">Submitted</Badge>
+                              {item.is_late && <Badge variant="destructive" className="text-xs">Late</Badge>}
+                            </div>
+                          ) : '-'}
+                        </TableCell>
+                        <TableCell>
+                          {item.notSubmitted ? '-' : (
+                            <Badge variant={item.status === 'graded' ? 'default' : 'outline'}>
+                              {item.status || 'Pending'}
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {item.marks !== null && item.marks !== undefined ? (
+                            <span className="font-semibold">{item.marks}</span>
+                          ) : '-'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {!item.notSubmitted && (
+                            <div className="flex justify-end gap-2">
+                              {item.file_url && (
+                                <Button variant="ghost" size="sm" asChild>
+                                  <a href={item.file_url} target="_blank" rel="noopener noreferrer">
+                                    <ExternalLink className="w-4 h-4" />
+                                  </a>
+                                </Button>
+                              )}
+                              <Button variant="outline" size="sm" onClick={() => openGradeDialog(item as Submission)}>
+                                Grade
+                              </Button>
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Grade Dialog */}
       <Dialog open={!!gradeSubmission} onOpenChange={() => setGradeSubmission(null)}>

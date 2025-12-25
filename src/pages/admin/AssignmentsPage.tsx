@@ -22,6 +22,7 @@ const navItems = [
 const BRANCHES = ['CSE', 'AIML', 'AI', 'DS', 'IT', 'ECE', 'EEE', 'MECH', 'CIVIL'];
 const YEARS = [1, 2, 3, 4];
 const SECTIONS = ['A', 'B', 'C'];
+const SEMESTERS = ['I', 'II'];
 
 interface Submission {
   id: string;
@@ -63,6 +64,7 @@ const AssignmentsPage = () => {
   const [filterYear, setFilterYear] = useState<string>('all');
   const [filterBranch, setFilterBranch] = useState<string>('all');
   const [filterSection, setFilterSection] = useState<string>('all');
+  const [filterSemester, setFilterSemester] = useState<string>('all');
 
   const fetchAssignments = useCallback(async () => {
     try {
@@ -119,7 +121,8 @@ const AssignmentsPage = () => {
     const matchesYear = filterYear === 'all' || a.year.toString() === filterYear;
     const matchesBranch = filterBranch === 'all' || a.branch === filterBranch;
     const matchesSection = filterSection === 'all' || a.section === filterSection;
-    return matchesYear && matchesBranch && matchesSection;
+    const matchesSemester = filterSemester === 'all'; // No semester in assignment table yet, filter disabled
+    return matchesYear && matchesBranch && matchesSection && matchesSemester;
   });
 
   const stats = {
@@ -227,6 +230,17 @@ const AssignmentsPage = () => {
                 <SelectItem value="all">All Branches</SelectItem>
                 {BRANCHES.map((b) => (
                   <SelectItem key={b} value={b}>{b}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterSemester} onValueChange={setFilterSemester}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Semester" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Semesters</SelectItem>
+                {SEMESTERS.map((s) => (
+                  <SelectItem key={s} value={s}>Sem {s}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
