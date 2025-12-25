@@ -97,6 +97,7 @@ export type Database = {
           faculty_profile_id: string
           id: string
           section: string
+          semester: string
           year: number
         }
         Insert: {
@@ -105,6 +106,7 @@ export type Database = {
           faculty_profile_id: string
           id?: string
           section: string
+          semester?: string
           year: number
         }
         Update: {
@@ -113,6 +115,7 @@ export type Database = {
           faculty_profile_id?: string
           id?: string
           section?: string
+          semester?: string
           year?: number
         }
         Relationships: [
