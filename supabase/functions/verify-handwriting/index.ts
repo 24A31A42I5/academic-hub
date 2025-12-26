@@ -25,8 +25,37 @@ interface VerificationResult {
   flagged_concerns: string[];
 }
 
-async function fetchFileAsBase64(url: string): Promise<string> {
+async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
   console.log('Fetching file:', url);
+  
+  // Check if it's a Supabase storage URL that needs authenticated access
+  if (url.includes('/storage/v1/object/public/uploads/') && supabase) {
+    // Extract the path from the URL for private bucket access
+    const pathMatch = url.match(/\/uploads\/(.+)$/);
+    if (pathMatch) {
+      const filePath = pathMatch[1];
+      console.log('Downloading from private bucket, path:', filePath);
+      
+      const { data, error } = await supabase.storage
+        .from('uploads')
+        .download(filePath);
+      
+      if (error) {
+        console.error('Storage download error:', error);
+        throw new Error(`Failed to download from storage: ${error.message}`);
+      }
+      
+      const arrayBuffer = await data.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < uint8Array.length; i++) {
+        binary += String.fromCharCode(uint8Array[i]);
+      }
+      return btoa(binary);
+    }
+  }
+  
+  // Fallback to regular fetch for public URLs
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch file: ${response.status}`);
@@ -116,8 +145,8 @@ serve(async (req) => {
 
     // Fetch both files as base64
     const [referenceBase64, submissionBase64] = await Promise.all([
-      fetchFileAsBase64(studentDetails.handwriting_url),
-      fetchFileAsBase64(file_url),
+      fetchFileAsBase64(studentDetails.handwriting_url, supabase),
+      fetchFileAsBase64(file_url, supabase),
     ]);
 
     const referenceMimeType = getMimeType(studentDetails.handwriting_url);
