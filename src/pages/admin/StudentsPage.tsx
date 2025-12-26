@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Loader2, Upload, Search, Users, CheckCircle, XCircle, FileSpreadsheet, Download, Pencil, Trash2 } from 'lucide-react';
+import { Loader2, Upload, Search, Users, CheckCircle, XCircle, FileSpreadsheet, Download, Pencil, Trash2, RotateCcw, FileEdit } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { logger } from '@/lib/logger';
 
@@ -37,6 +37,7 @@ interface StudentDetails {
   section: string;
   semester: string;
   has_logged_in: boolean;
+  handwriting_url: string | null;
 }
 
 interface Student {
@@ -108,7 +109,8 @@ const StudentsPage = () => {
             branch,
             section,
             semester,
-            has_logged_in
+            has_logged_in,
+            handwriting_url
           )
         `)
         .eq('role', 'student')
@@ -303,6 +305,26 @@ const StudentsPage = () => {
       toast.error('Failed to delete student');
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleResetHandwriting = async (student: Student) => {
+    try {
+      const { error } = await supabase
+        .from('student_details')
+        .update({ 
+          handwriting_url: null, 
+          handwriting_submitted_at: null 
+        })
+        .eq('profile_id', student.id);
+
+      if (error) throw error;
+
+      toast.success(`Handwriting reset for ${student.full_name}. Student can now re-upload.`);
+      fetchStudents();
+    } catch (error) {
+      logger.error('Error resetting handwriting', error);
+      toast.error('Failed to reset handwriting');
     }
   };
 
@@ -742,14 +764,15 @@ const StudentsPage = () => {
                   <TableHead>Sem</TableHead>
                   <TableHead>Branch</TableHead>
                   <TableHead>Section</TableHead>
+                  <TableHead>Handwriting</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="w-[100px]">Actions</TableHead>
+                  <TableHead className="w-[120px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredStudents.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                       No students found
                     </TableCell>
                   </TableRow>
@@ -766,6 +789,19 @@ const StudentsPage = () => {
                         <TableCell>{details?.branch || '-'}</TableCell>
                         <TableCell>{details?.section || '-'}</TableCell>
                         <TableCell>
+                          {details?.handwriting_url ? (
+                            <Badge className="bg-green-500/10 text-green-600 hover:bg-green-500/20">
+                              <FileEdit className="w-3 h-3 mr-1" />
+                              Uploaded
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-muted-foreground">
+                              <XCircle className="w-3 h-3 mr-1" />
+                              Not Uploaded
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
                           {details?.has_logged_in ? (
                             <Badge className="bg-green-500/10 text-green-600 hover:bg-green-500/20">
                               <CheckCircle className="w-3 h-3 mr-1" />
@@ -780,12 +816,35 @@ const StudentsPage = () => {
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">
-                            <Button variant="ghost" size="icon" onClick={() => handleEdit(student)}>
+                            <Button variant="ghost" size="icon" onClick={() => handleEdit(student)} title="Edit Student">
                               <Pencil className="w-4 h-4" />
                             </Button>
+                            {details?.handwriting_url && (
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="text-amber-600 hover:text-amber-700" title="Reset Handwriting">
+                                    <RotateCcw className="w-4 h-4" />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Reset Handwriting</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      This will clear the handwriting sample for {student.full_name} and allow them to upload a new one. Continue?
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handleResetHandwriting(student)}>
+                                      Reset Handwriting
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            )}
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Delete Student">
                                   <Trash2 className="w-4 h-4" />
                                 </Button>
                               </AlertDialogTrigger>
