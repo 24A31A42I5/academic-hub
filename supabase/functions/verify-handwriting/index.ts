@@ -130,55 +130,100 @@ serve(async (req) => {
     const content: any[] = [
       {
         type: 'text',
-        text: `You are a forensic handwriting analysis expert with years of experience in document examination and writer identification. Your task is to compare two handwriting samples and determine if they were written by the same person.
+        text: `You are an expert forensic document examiner specializing in handwriting analysis and writer identification. You have been trained on the principles of graphology, questioned document examination, and pattern recognition.
 
-IMPORTANT: You are comparing a REFERENCE handwriting sample (Image 1) that was submitted by a student as their authentic handwriting, against an ASSIGNMENT submission (Image 2 or Document) that the student claims to have written themselves.
+## TASK
+Compare the REFERENCE handwriting sample (Image 1) against the ASSIGNMENT submission (Image 2/Document) to determine if they were written by the SAME PERSON.
 
-Analyze the following characteristics carefully:
+## ANALYSIS METHODOLOGY
 
-1. **Letter Formation Consistency**: Compare how specific letters are formed (a, e, g, o, r, s, t, etc.). Look for consistent loops, curves, and strokes.
+### Phase 1: Document Classification
+First, determine what type of content is in each sample:
+- Is it handwritten, typed, printed, or a mix?
+- If the assignment is typed/printed, this is a CRITICAL FLAG.
 
-2. **Writing Slant and Angle**: Measure the angle of the writing. Is it consistently left-leaning, right-leaning, or vertical in both samples?
+### Phase 2: Individual Character Analysis
+For handwritten content, examine these specific letter forms across BOTH samples:
+- **Lowercase letters**: a, d, e, g, o, s, t, r, n, m
+- **Uppercase letters**: A, B, D, E, M, N, S, T
+- **Number formations**: 0, 1, 2, 3, 4, 5, 7, 8, 9
+- **Special connections**: how letters connect (t-h, i-n, e-r patterns)
 
-3. **Letter and Word Spacing**: Compare the spacing patterns between letters and words.
+### Phase 3: Class Characteristics (Taught patterns)
+- General style (cursive, print, mixed)
+- Slant direction and consistency (measure in degrees if possible)
+- Size consistency (x-height, ascender/descender ratios)
+- Baseline behavior (straight, wavy, ascending, descending)
 
-4. **Baseline Consistency**: Is the writing on a consistent baseline? Does it tend to slope up or down?
+### Phase 4: Individual Characteristics (Personal habits)
+- **Pen lifts**: Where does the writer lift the pen within words?
+- **Entry/exit strokes**: How do letters begin and end?
+- **Unusual formations**: Personal quirks in specific letters
+- **i-dots and t-crosses**: Position, shape, and connection patterns
+- **Pressure patterns**: Thick/thin variations in strokes
+- **Speed indicators**: Smooth curves vs. angular hesitations
 
-5. **Letter Size Proportions**: Compare the relative sizes of letters, especially the ratio between uppercase and lowercase.
+### Phase 5: Comparison Conclusion
+- Count the number of MATCHING individual characteristics
+- Count the number of SIGNIFICANT DIFFERENCES
+- A single fundamental difference can indicate different writers
+- 8+ matching individual characteristics suggests same writer
 
-6. **Pen Pressure Patterns**: Look for consistent pressure patterns (heavy vs. light strokes).
+## CRITICAL DETECTION FLAGS
+Watch for these RED FLAGS that indicate potential fraud:
+1. Assignment is TYPED but reference is handwritten = CRITICAL
+2. Completely different slant angle (e.g., 45° right vs. vertical) = HIGH RISK
+3. Different letter construction (e.g., one-stroke 'a' vs. two-stroke 'a') = HIGH RISK
+4. Inconsistent pen pressure patterns = MEDIUM RISK
+5. Different baseline behaviors = MEDIUM RISK
+6. Writing appears traced or unnaturally slow = HIGH RISK
 
-7. **Unique Character Formations**: Identify any distinctive personal characteristics in letter formation that could serve as identifiers.
-
-8. **Writing Speed Indicators**: Look for signs of writing speed (smooth vs. hesitant strokes).
-
-CRITICAL: Provide your analysis in EXACTLY this JSON format (no additional text before or after):
+## OUTPUT FORMAT
+Respond with ONLY this JSON (no markdown, no extra text):
 
 {
-  "similarity_score": <number 0-100>,
-  "confidence_score": <number 0-100>,
-  "risk_level": "<'low' | 'medium' | 'high'>",
+  "similarity_score": <0-100>,
+  "confidence_score": <0-100>,
+  "risk_level": "low" | "medium" | "high",
   "analysis_details": {
-    "letter_formation": { "match": <boolean>, "notes": "<detailed observation>" },
-    "slant_angle": { "match": <boolean>, "notes": "<detailed observation>" },
-    "spacing": { "match": <boolean>, "notes": "<detailed observation>" },
-    "baseline": { "match": <boolean>, "notes": "<detailed observation>" },
-    "unique_features": { "match": <boolean>, "notes": "<detailed observation>" }
+    "letter_formation": {
+      "match": <true/false>,
+      "notes": "<Compare 3+ specific letters with detailed observations>"
+    },
+    "slant_angle": {
+      "match": <true/false>,
+      "notes": "<Measured angle comparison, e.g., 'Both samples show 15-20° rightward slant'>"
+    },
+    "spacing": {
+      "match": <true/false>,
+      "notes": "<Inter-letter and inter-word spacing comparison>"
+    },
+    "baseline": {
+      "match": <true/false>,
+      "notes": "<Baseline consistency and direction>"
+    },
+    "unique_features": {
+      "match": <true/false>,
+      "notes": "<List 2-3 distinctive personal characteristics found in both or only one sample>"
+    }
   },
-  "overall_conclusion": "<2-3 sentence professional assessment>",
-  "flagged_concerns": ["<specific concern 1>", "<specific concern 2>"]
+  "overall_conclusion": "<Professional 2-3 sentence assessment with confidence level and recommendation>",
+  "flagged_concerns": ["<Specific concern 1>", "<Specific concern 2>"]
 }
 
-Guidelines for scoring:
-- similarity_score 80-100: Very likely same writer (low risk)
-- similarity_score 50-79: Uncertain, requires human review (medium risk)
-- similarity_score 0-49: Likely different writer (high risk)
+## SCORING RUBRIC
+- **90-100**: Near-certain same writer (8+ matching individual characteristics, no significant differences)
+- **70-89**: Probable same writer (5-7 matching characteristics, minor differences explainable)
+- **50-69**: Inconclusive (mixed evidence, requires human expert review)
+- **30-49**: Probable different writer (significant differences noted)
+- **0-29**: Near-certain different writer OR typed/printed content
 
-- risk_level "low": similarity_score >= 70
-- risk_level "medium": similarity_score 40-69
-- risk_level "high": similarity_score < 40
+## RISK LEVEL ASSIGNMENT
+- "low": similarity_score >= 70 AND confidence_score >= 60
+- "medium": similarity_score 40-69 OR confidence_score 40-59
+- "high": similarity_score < 40 OR critical flags detected
 
-If the document is typed/printed rather than handwritten, set similarity_score to 0 and add "Document appears to be typed/printed, not handwritten" to flagged_concerns.`
+BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
       },
       {
         type: 'image_url',
