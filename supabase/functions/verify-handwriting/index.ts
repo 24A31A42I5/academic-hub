@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
 
 const corsHeaders = {
@@ -27,7 +28,7 @@ interface VerificationResult {
 
 async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
   console.log('Fetching file:', url);
-  
+
   // Check if it's a Supabase storage URL that needs authenticated access
   if (url.includes('/storage/v1/object/public/uploads/') && supabase) {
     // Extract the path from the URL for private bucket access
@@ -35,38 +36,28 @@ async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
     if (pathMatch) {
       const filePath = pathMatch[1];
       console.log('Downloading from private bucket, path:', filePath);
-      
+
       const { data, error } = await supabase.storage
         .from('uploads')
         .download(filePath);
-      
+
       if (error) {
         console.error('Storage download error:', error);
         throw new Error(`Failed to download from storage: ${error.message}`);
       }
-      
+
       const arrayBuffer = await data.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      let binary = '';
-      for (let i = 0; i < uint8Array.length; i++) {
-        binary += String.fromCharCode(uint8Array[i]);
-      }
-      return btoa(binary);
+      return encode(arrayBuffer);
     }
   }
-  
+
   // Fallback to regular fetch for public URLs
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch file: ${response.status}`);
   }
   const arrayBuffer = await response.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
-  let binary = '';
-  for (let i = 0; i < uint8Array.length; i++) {
-    binary += String.fromCharCode(uint8Array[i]);
-  }
-  return btoa(binary);
+  return encode(arrayBuffer);
 }
 
 function getMimeType(url: string, fileType?: string): string {
@@ -108,6 +99,23 @@ serve(async (req) => {
 
     // Create Supabase client
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // Mark the submission as "pending verification" immediately so the UI never shows a false "Verified".
+    try {
+      await supabase
+        .from('submissions')
+        .update({
+          ai_risk_level: 'pending',
+          verified_at: null,
+          ai_similarity_score: null,
+          ai_confidence_score: null,
+          ai_flagged_sections: null,
+          ai_analysis_details: null,
+        })
+        .eq('id', submission_id);
+    } catch (e) {
+      console.error('Failed to set pending verification state:', e);
+    }
 
     // Fetch student's reference handwriting
     const { data: studentDetails, error: studentError } = await supabase
