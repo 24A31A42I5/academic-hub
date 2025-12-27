@@ -22,6 +22,21 @@ const navItems = [
   { label: 'AI Reviews', href: '/faculty/reviews', icon: DashboardIcons.AlertTriangle },
 ];
 
+interface AIAnalysisDetails {
+  similarity_score: number;
+  confidence_score: number;
+  risk_level: string;
+  analysis_details?: {
+    letter_formation?: { match: boolean; notes: string };
+    slant_angle?: { match: boolean; notes: string };
+    spacing?: { match: boolean; notes: string };
+    baseline?: { match: boolean; notes: string };
+    unique_features?: { match: boolean; notes: string };
+  };
+  overall_conclusion?: string;
+  flagged_concerns?: string[];
+}
+
 interface FlaggedSubmission {
   id: string;
   file_url: string;
@@ -34,6 +49,7 @@ interface FlaggedSubmission {
   ai_similarity_score: number | null;
   ai_confidence_score: number | null;
   ai_flagged_sections: string[] | null;
+  ai_analysis_details: AIAnalysisDetails | null;
   student_profile: {
     id: string;
     full_name: string;
@@ -81,6 +97,7 @@ const FacultyReviews = () => {
           ai_similarity_score,
           ai_confidence_score,
           ai_flagged_sections,
+          ai_analysis_details,
           student_profile:profiles!submissions_student_profile_id_fkey (
             id,
             full_name,
@@ -262,7 +279,7 @@ const FacultyReviews = () => {
                     </div>
 
                     {/* AI Analysis Details */}
-                    <div className="p-4 bg-muted/50 rounded-lg space-y-2">
+                    <div className="p-4 bg-muted/50 rounded-lg space-y-3">
                       <div className="flex gap-6">
                         {submission.ai_similarity_score !== null && (
                           <div>
@@ -277,12 +294,42 @@ const FacultyReviews = () => {
                           </div>
                         )}
                       </div>
+                      
+                      {/* Detailed Analysis */}
+                      {submission.ai_analysis_details?.analysis_details && (
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-2 border-t">
+                          {Object.entries(submission.ai_analysis_details.analysis_details).map(([key, value]) => (
+                            <div key={key} className="text-xs">
+                              <p className="text-muted-foreground capitalize">{key.replace('_', ' ')}</p>
+                              <div className="flex items-center gap-1">
+                                {value.match ? (
+                                  <CheckCircle className="w-3 h-3 text-green-500" />
+                                ) : (
+                                  <XCircle className="w-3 h-3 text-destructive" />
+                                )}
+                                <span className={value.match ? 'text-green-600' : 'text-destructive'}>
+                                  {value.match ? 'Match' : 'Mismatch'}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {/* Overall Conclusion */}
+                      {submission.ai_analysis_details?.overall_conclusion && (
+                        <div className="pt-2 border-t">
+                          <p className="text-xs text-muted-foreground mb-1">AI Conclusion</p>
+                          <p className="text-sm">{submission.ai_analysis_details.overall_conclusion}</p>
+                        </div>
+                      )}
+                      
                       {submission.ai_flagged_sections && submission.ai_flagged_sections.length > 0 && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">Flagged Sections</p>
+                        <div className="pt-2 border-t">
+                          <p className="text-xs text-muted-foreground mb-1">Flagged Concerns</p>
                           <div className="flex flex-wrap gap-1">
                             {submission.ai_flagged_sections.map((section, idx) => (
-                              <Badge key={idx} variant="secondary" className="text-xs">
+                              <Badge key={idx} variant="destructive" className="text-xs">
                                 {section}
                               </Badge>
                             ))}

@@ -10,7 +10,7 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: "assignment_graded" | "new_assignment";
+  type: "assignment_graded" | "new_assignment" | "submission_flagged";
   data: {
     studentEmail?: string;
     studentName?: string;
@@ -23,6 +23,9 @@ interface NotificationRequest {
     year?: number;
     section?: string;
     semester?: string;
+    riskLevel?: string;
+    similarityScore?: number;
+    flaggedConcerns?: string[];
   };
 }
 
@@ -95,6 +98,88 @@ const handler = async (req: Request): Promise<Response> => {
       });
 
       console.log("Grade notification sent:", emailResponse);
+      return new Response(JSON.stringify({ success: true, emailResponse }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+
+    } else if (type === "submission_flagged") {
+      if (!data.studentEmail) {
+        throw new Error("Student email is required for flagged notification");
+      }
+
+      const riskColor = data.riskLevel === 'high' ? '#dc2626' : '#f59e0b';
+      const riskText = data.riskLevel === 'high' ? 'High Risk' : 'Medium Risk';
+
+      const emailResponse = await resend.emails.send({
+        from: "Assignment Portal <onboarding@resend.dev>",
+        to: [data.studentEmail],
+        subject: `⚠️ Your submission for "${data.assignmentTitle}" requires attention`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { background: linear-gradient(135deg, ${riskColor}, #991b1b); color: white; padding: 30px; border-radius: 12px 12px 0 0; }
+              .content { background: #f8fafc; padding: 30px; border-radius: 0 0 12px 12px; }
+              .alert-box { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid ${riskColor}; }
+              .concerns-list { background: #fef2f2; padding: 15px; border-radius: 8px; margin: 15px 0; }
+              .footer { text-align: center; color: #64748b; font-size: 12px; margin-top: 20px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1 style="margin: 0;">⚠️ Submission Flagged</h1>
+              </div>
+              <div class="content">
+                <p>Hello ${data.studentName || "Student"},</p>
+                <p>Your submission for <strong>"${data.assignmentTitle}"</strong> has been flagged by our AI verification system.</p>
+                
+                <div class="alert-box">
+                  <h3 style="margin: 0 0 10px 0; color: ${riskColor};">${riskText} Detection</h3>
+                  <p style="margin: 0;">Our system detected potential discrepancies between your submission and your registered handwriting sample.</p>
+                  ${data.similarityScore !== undefined ? `
+                  <p style="margin: 10px 0 0 0; font-size: 14px; color: #6b7280;">
+                    Similarity Score: ${data.similarityScore}%
+                  </p>
+                  ` : ''}
+                </div>
+                
+                ${data.flaggedConcerns && data.flaggedConcerns.length > 0 ? `
+                <div class="concerns-list">
+                  <h4 style="margin: 0 0 10px 0; color: #991b1b;">Concerns Identified:</h4>
+                  <ul style="margin: 0; padding-left: 20px;">
+                    ${data.flaggedConcerns.map(c => `<li style="color: #374151; margin-bottom: 5px;">${c}</li>`).join('')}
+                  </ul>
+                </div>
+                ` : ''}
+                
+                <div class="alert-box" style="border-left-color: #3b82f6;">
+                  <h3 style="margin: 0 0 10px 0; color: #3b82f6;">What happens next?</h3>
+                  <ul style="margin: 0; padding-left: 20px; color: #374151;">
+                    <li>Your submission will be reviewed by your faculty</li>
+                    <li>If this was a mistake, no action is required</li>
+                    <li>You may be asked to provide additional verification</li>
+                  </ul>
+                </div>
+                
+                <p style="color: #6b7280; font-size: 14px;">
+                  If you believe this is an error, please contact your faculty directly.
+                </p>
+              </div>
+              <div class="footer">
+                <p>This is an automated notification from Assignment Portal.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+      });
+
+      console.log("Flagged notification sent:", emailResponse);
       return new Response(JSON.stringify({ success: true, emailResponse }), {
         status: 200,
         headers: { "Content-Type": "application/json", ...corsHeaders },
