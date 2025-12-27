@@ -380,6 +380,54 @@ BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
 
     console.log('Submission updated successfully');
 
+    // Send email notification if submission is flagged (high or medium risk)
+    if (verificationResult.risk_level === 'high' || verificationResult.risk_level === 'medium') {
+      console.log('Submission flagged, sending notification...');
+      
+      // Fetch student info for email
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', student_profile_id)
+        .single();
+      
+      // Fetch assignment title
+      const { data: submissionData } = await supabase
+        .from('submissions')
+        .select('assignment:assignments(title)')
+        .eq('id', submission_id)
+        .single();
+      
+      if (profileData?.email) {
+        try {
+          const notifyResponse = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            },
+            body: JSON.stringify({
+              type: 'submission_flagged',
+              data: {
+                studentEmail: profileData.email,
+                studentName: profileData.full_name,
+                assignmentTitle: (submissionData?.assignment as any)?.title || 'Assignment',
+                riskLevel: verificationResult.risk_level,
+                similarityScore: verificationResult.similarity_score,
+                flaggedConcerns: verificationResult.flagged_concerns,
+              },
+            }),
+          });
+          
+          const notifyResult = await notifyResponse.json();
+          console.log('Notification result:', notifyResult);
+        } catch (notifyError) {
+          console.error('Failed to send notification:', notifyError);
+          // Don't fail the main function if notification fails
+        }
+      }
+    }
+
     return new Response(JSON.stringify({ 
       success: true, 
       result: verificationResult 

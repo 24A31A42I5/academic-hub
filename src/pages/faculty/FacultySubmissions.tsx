@@ -13,7 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, FileText, AlertTriangle, Clock, CheckCircle, ExternalLink, Search, Users, Mail } from 'lucide-react';
+import { Loader2, FileText, AlertTriangle, Clock, CheckCircle, ExternalLink, Search, Users, Mail, Shield, XCircle } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { format } from 'date-fns';
 
 const navItems = [
@@ -49,6 +50,7 @@ interface Submission {
   ai_risk_level: string | null;
   ai_similarity_score: number | null;
   ai_confidence_score: number | null;
+  verified_at: string | null;
   student_profile: {
     id: string;
     full_name: string;
@@ -116,6 +118,7 @@ const FacultySubmissions = () => {
             ai_risk_level,
             ai_similarity_score,
             ai_confidence_score,
+            verified_at,
             student_profile:profiles!submissions_student_profile_id_fkey (
               id,
               full_name,
@@ -323,17 +326,81 @@ const FacultySubmissions = () => {
     return matchesSearch && matchesAssignment && matchesStatus && matchesYear && matchesSemester && matchesBranch && matchesSection && matchesSubmitted;
   });
 
-  const getRiskBadge = (level: string | null) => {
+  const getRiskBadge = (submission: Submission) => {
+    const level = submission.ai_risk_level;
+    const isVerified = submission.ai_risk_level && submission.ai_risk_level !== 'pending';
+    
+    if (!isVerified) {
+      return (
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge variant="outline" className="gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Verifying
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent>AI verification in progress</TooltipContent>
+        </Tooltip>
+      );
+    }
+    
     switch (level) {
       case 'high':
-        return <Badge variant="destructive">High Risk</Badge>;
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge variant="destructive" className="gap-1">
+                <XCircle className="w-3 h-3" />
+                High Risk
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>Handwriting mismatch detected - review required</TooltipContent>
+          </Tooltip>
+        );
       case 'medium':
-        return <Badge className="bg-warning text-warning-foreground">Medium Risk</Badge>;
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge className="bg-warning text-warning-foreground gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Medium Risk
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>Some concerns detected - review recommended</TooltipContent>
+          </Tooltip>
+        );
       case 'low':
-        return <Badge variant="secondary">Low Risk</Badge>;
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge className="bg-green-500/10 text-green-600 gap-1">
+                <CheckCircle className="w-3 h-3" />
+                Verified
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>Handwriting matches reference sample</TooltipContent>
+          </Tooltip>
+        );
+      case 'unverified':
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge variant="outline" className="gap-1">
+                <Shield className="w-3 h-3" />
+                No Sample
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>Student hasn't uploaded handwriting sample</TooltipContent>
+          </Tooltip>
+        );
       default:
-        return <Badge variant="outline">Not Analyzed</Badge>;
+        return <Badge variant="outline">Pending</Badge>;
     }
+  };
+  
+  const canGradeSubmission = (submission: Submission) => {
+    // Allow grading only for verified (low risk) or unverified submissions
+    return submission.ai_risk_level === 'low' || submission.ai_risk_level === 'unverified';
   };
 
   const stats = {
@@ -510,6 +577,7 @@ const FacultySubmissions = () => {
                   <TableHead>Branch</TableHead>
                   <TableHead>Section</TableHead>
                   <TableHead>Submitted</TableHead>
+                  <TableHead>Verification</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Marks</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -553,6 +621,9 @@ const FacultySubmissions = () => {
                           ) : '-'}
                         </TableCell>
                         <TableCell>
+                          {item.notSubmitted ? '-' : getRiskBadge(item as Submission)}
+                        </TableCell>
+                        <TableCell>
                           {item.notSubmitted ? '-' : (
                             <Badge variant={item.status === 'graded' ? 'default' : 'outline'}>
                               {item.status || 'Pending'}
@@ -574,9 +645,22 @@ const FacultySubmissions = () => {
                                   </a>
                                 </Button>
                               )}
-                              <Button variant="outline" size="sm" onClick={() => openGradeDialog(item as Submission)}>
-                                Grade
-                              </Button>
+                              {canGradeSubmission(item as Submission) ? (
+                                <Button variant="outline" size="sm" onClick={() => openGradeDialog(item as Submission)}>
+                                  Grade
+                                </Button>
+                              ) : (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button variant="outline" size="sm" disabled className="opacity-50">
+                                      Grade
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    Flagged submissions must be reviewed in AI Reviews first
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
                             </div>
                           )}
                         </TableCell>
