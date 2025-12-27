@@ -105,7 +105,10 @@ const StudentSubmissions = () => {
   }, [profile]);
 
   const getVerificationBadge = (submission: Submission) => {
-    if (!submission.verified_at) {
+    // Check if AI has already processed (ai_risk_level is set) - this is the primary indicator
+    const isVerified = submission.ai_risk_level && submission.ai_risk_level !== 'pending';
+    
+    if (!isVerified) {
       return (
         <Tooltip>
           <TooltipTrigger>
