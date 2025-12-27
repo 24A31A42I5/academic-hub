@@ -150,8 +150,9 @@ const SubmitAssignment = () => {
             // Reset AI verification for re-submissions
             ai_similarity_score: null,
             ai_confidence_score: null,
-            ai_risk_level: null,
+            ai_risk_level: 'pending',
             ai_flagged_sections: null,
+            ai_analysis_details: null,
             verified_at: null,
           })
           .eq('id', existingSubmission.id);
@@ -168,6 +169,13 @@ const SubmitAssignment = () => {
             file_type: selectedFile.type,
             is_late: isLate,
             status: 'pending',
+            // Ensure the UI never shows “Verified” before verification actually ran
+            ai_risk_level: 'pending',
+            verified_at: null,
+            ai_similarity_score: null,
+            ai_confidence_score: null,
+            ai_flagged_sections: null,
+            ai_analysis_details: null,
           })
           .select('id')
           .single();
@@ -186,15 +194,17 @@ const SubmitAssignment = () => {
           file_type: selectedFile.type,
           student_profile_id: profile.id,
         },
-      }).then(({ error }) => {
-        if (error) {
-          console.error('Verification error:', error);
-        } else {
-          console.log('Handwriting verification completed');
-        }
-      }).catch((err) => {
-        console.error('Verification failed:', err);
-      });
+       }).then(({ error }) => {
+         if (error) {
+           console.error('Verification error:', error);
+           toast.error('Handwriting verification failed — please try re-submitting.');
+         } else {
+           console.log('Handwriting verification completed');
+         }
+       }).catch((err) => {
+         console.error('Verification failed:', err);
+         toast.error('Handwriting verification failed — please try re-submitting.');
+       });
 
       navigate('/student/submissions');
     } catch (error: any) {

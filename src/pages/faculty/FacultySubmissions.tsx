@@ -328,9 +328,9 @@ const FacultySubmissions = () => {
 
   const getRiskBadge = (submission: Submission) => {
     const level = submission.ai_risk_level;
-    const isVerified = submission.ai_risk_level && submission.ai_risk_level !== 'pending';
-    
-    if (!isVerified) {
+    const hasVerificationResult = !!submission.verified_at;
+
+    if (!hasVerificationResult || !level || level === 'pending') {
       return (
         <Tooltip>
           <TooltipTrigger>
@@ -399,7 +399,10 @@ const FacultySubmissions = () => {
   };
   
   const canGradeSubmission = (submission: Submission) => {
-    // Allow grading only for verified (low risk) or unverified submissions
+    // Only allow grading once verification actually completed.
+    if (!submission.verified_at) return false;
+
+    // Allow grading only for verified (low risk) or "no sample" submissions.
     return submission.ai_risk_level === 'low' || submission.ai_risk_level === 'unverified';
   };
 
@@ -638,7 +641,7 @@ const FacultySubmissions = () => {
                         <TableCell className="text-right">
                           {!item.notSubmitted && (
                             <div className="flex justify-end gap-2">
-                              {item.file_url && (
+                              {item.file_url && canGradeSubmission(item as Submission) && (
                                 <Button variant="ghost" size="sm" asChild>
                                   <a href={item.file_url} target="_blank" rel="noopener noreferrer">
                                     <ExternalLink className="w-4 h-4" />
