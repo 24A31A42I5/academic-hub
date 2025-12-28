@@ -11,3 +11,6 @@ verify_jwt = true
 
 [functions.verify-handwriting]
 verify_jwt = false
+
+[functions.extract-handwriting-features]
+verify_jwt = false
