@@ -159,6 +159,9 @@ export type Database = {
         Row: {
           branch: string
           created_at: string
+          handwriting_feature_embedding: Json | null
+          handwriting_features_extracted_at: string | null
+          handwriting_image_hash: string | null
           handwriting_submitted_at: string | null
           handwriting_url: string | null
           has_logged_in: boolean | null
@@ -172,6 +175,9 @@ export type Database = {
         Insert: {
           branch: string
           created_at?: string
+          handwriting_feature_embedding?: Json | null
+          handwriting_features_extracted_at?: string | null
+          handwriting_image_hash?: string | null
           handwriting_submitted_at?: string | null
           handwriting_url?: string | null
           has_logged_in?: boolean | null
@@ -185,6 +191,9 @@ export type Database = {
         Update: {
           branch?: string
           created_at?: string
+          handwriting_feature_embedding?: Json | null
+          handwriting_features_extracted_at?: string | null
+          handwriting_image_hash?: string | null
           handwriting_submitted_at?: string | null
           handwriting_url?: string | null
           has_logged_in?: boolean | null

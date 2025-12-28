@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, Upload, AlertTriangle, CheckCircle, Image, FileWarning, Lock } from 'lucide-react';
+import { Loader2, Upload, AlertTriangle, CheckCircle, Image, FileWarning, Lock, Copy, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 
 const navItems = [
@@ -19,15 +19,24 @@ const navItems = [
   { label: 'Grades', href: '/student/grades', icon: DashboardIcons.CheckCircle },
 ];
 
+// Comprehensive sample text for feature extraction
+const SAMPLE_TEXT = `ABCDEFGHIJKLMNOPQRSTUVWXYZ
+abcdefghijklmnopqrstuvwxyz
+0123456789
+The quick brown fox jumps over the lazy dog.
+Pack my box with five dozen liquor jugs.`;
+
 const StudentHandwriting = () => {
   const { profile, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [studentDetails, setStudentDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [extractingFeatures, setExtractingFeatures] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -60,6 +69,51 @@ const StudentHandwriting = () => {
     }
   }, [profile]);
 
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(SAMPLE_TEXT);
+      setCopied(true);
+      toast.success('Sample text copied to clipboard!');
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      toast.error('Failed to copy text');
+    }
+  };
+
+  // Compute SHA-256 hash of file
+  const computeFileHash = async (file: File): Promise<string> => {
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
+  // Strip EXIF data by re-encoding the image
+  const stripExifData = async (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = document.createElement('img');
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx?.drawImage(img, 0, 0);
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Failed to process image'));
+          }
+        }, 'image/jpeg', 0.95);
+      };
+
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -87,15 +141,34 @@ const StudentHandwriting = () => {
 
     setUploading(true);
     try {
-      // Upload to storage
-      const fileExt = selectedFile.name.split('.').pop();
-      const fileName = `${user.id}/handwriting.${fileExt}`;
+      // Compute hash of original file
+      const imageHash = await computeFileHash(selectedFile);
+      
+      // Check if this exact image has been uploaded before
+      const { data: existingHash } = await supabase
+        .from('student_details')
+        .select('id, profile_id')
+        .eq('handwriting_image_hash', imageHash)
+        .maybeSingle();
+      
+      if (existingHash && existingHash.profile_id !== profile?.id) {
+        toast.error('This image has already been used by another student. Please upload your own handwriting sample.');
+        setUploading(false);
+        return;
+      }
 
-      const { error: uploadError, data } = await supabase.storage
+      // Strip EXIF data
+      const strippedImage = await stripExifData(selectedFile);
+      
+      // Upload to storage
+      const fileName = `${user.id}/handwriting.jpg`;
+
+      const { error: uploadError } = await supabase.storage
         .from('handwriting-samples')
-        .upload(fileName, selectedFile, {
+        .upload(fileName, strippedImage, {
           cacheControl: '3600',
-          upsert: false, // Prevent overwriting
+          upsert: false,
+          contentType: 'image/jpeg',
         });
 
       if (uploadError) {
@@ -112,24 +185,49 @@ const StudentHandwriting = () => {
         .from('handwriting-samples')
         .getPublicUrl(fileName);
 
-      // Update student_details with handwriting URL
+      // Update student_details with handwriting URL and hash
       const { error: updateError } = await supabase
         .from('student_details')
         .update({
           handwriting_url: publicUrl,
           handwriting_submitted_at: new Date().toISOString(),
+          handwriting_image_hash: imageHash,
         })
         .eq('id', studentDetails.id);
 
       if (updateError) throw updateError;
 
-      // Refresh student details
-      setStudentDetails({
-        ...studentDetails,
-        handwriting_url: publicUrl,
-        handwriting_submitted_at: new Date().toISOString(),
-      });
+      // Now extract features using the edge function
+      setUploading(false);
+      setExtractingFeatures(true);
 
+      try {
+        const { data: featureData, error: featureError } = await supabase.functions.invoke('extract-handwriting-features', {
+          body: {
+            image_url: publicUrl,
+            student_details_id: studentDetails.id,
+          },
+        });
+
+        if (featureError) {
+          console.error('Feature extraction error:', featureError);
+          toast.warning('Image uploaded but feature extraction failed. Your submission will still work.');
+        } else if (featureData?.success) {
+          toast.success('Handwriting features extracted successfully!');
+        }
+      } catch (featureErr) {
+        console.error('Feature extraction error:', featureErr);
+        toast.warning('Image uploaded but feature extraction failed.');
+      }
+
+      // Refresh student details
+      const { data: updatedDetails } = await supabase
+        .from('student_details')
+        .select('*')
+        .eq('id', studentDetails.id)
+        .single();
+
+      setStudentDetails(updatedDetails);
       toast.success('Handwriting sample uploaded successfully');
       setShowConfirmDialog(false);
       setSelectedFile(null);
@@ -139,6 +237,7 @@ const StudentHandwriting = () => {
       toast.error(error.message || 'Failed to upload handwriting sample');
     } finally {
       setUploading(false);
+      setExtractingFeatures(false);
     }
   };
 
@@ -167,6 +266,7 @@ const StudentHandwriting = () => {
   }
 
   const hasHandwriting = !!studentDetails?.handwriting_url;
+  const hasFeatures = !!studentDetails?.handwriting_feature_embedding;
 
   return (
     <DashboardLayout title="My Handwriting" role="student" navItems={navItems}>
@@ -176,7 +276,7 @@ const StudentHandwriting = () => {
         </div>
       )}
 
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-3xl mx-auto">
         {/* Warning Alert */}
         <Alert variant="destructive" className="mb-6">
           <AlertTriangle className="h-5 w-5" />
@@ -196,7 +296,7 @@ const StudentHandwriting = () => {
               Handwriting Sample
             </CardTitle>
             <CardDescription>
-              Upload a clear image of your handwriting for verification purposes
+              Upload a comprehensive handwriting sample for AI-powered verification
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -205,6 +305,12 @@ const StudentHandwriting = () => {
                 <div className="flex items-center gap-2 p-4 bg-student/10 rounded-lg text-student">
                   <CheckCircle className="w-5 h-5" />
                   <span className="font-medium">Handwriting sample submitted</span>
+                  {hasFeatures && (
+                    <div className="flex items-center gap-1 ml-auto text-xs bg-student/20 px-2 py-1 rounded-full">
+                      <Sparkles className="w-3 h-3" />
+                      Features Extracted
+                    </div>
+                  )}
                 </div>
 
                 <div className="border rounded-lg overflow-hidden">
@@ -238,12 +344,40 @@ const StudentHandwriting = () => {
                 </div>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-6">
+                {/* Sample Text to Write */}
+                <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-primary flex items-center gap-2">
+                      <Sparkles className="w-4 h-4" />
+                      Required Sample Text
+                    </h3>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={copyToClipboard}
+                      className="text-xs"
+                    >
+                      <Copy className="w-3 h-3 mr-1" />
+                      {copied ? 'Copied!' : 'Copy'}
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Write the following text <strong>exactly</strong> on a plain white paper in your natural handwriting:
+                  </p>
+                  <div className="p-4 bg-background rounded border font-mono text-sm whitespace-pre-wrap leading-relaxed">
+                    {SAMPLE_TEXT}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-3">
+                    📝 This comprehensive sample helps the AI extract your unique handwriting features for accurate verification.
+                  </p>
+                </div>
+
                 <div className="border-2 border-dashed rounded-lg p-8 text-center">
                   <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-lg font-medium mb-2">Upload Handwriting Sample</p>
+                  <p className="text-lg font-medium mb-2">Upload Your Handwriting Sample</p>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Drag and drop an image or click to browse
+                    Take a clear photo of your written sample and upload it
                   </p>
                   <input
                     ref={fileInputRef}
@@ -268,10 +402,11 @@ const StudentHandwriting = () => {
                 <div className="p-4 bg-muted rounded-lg">
                   <p className="text-sm font-medium mb-2">Tips for a good handwriting sample:</p>
                   <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                    <li>Write at least 3-4 sentences in your natural handwriting</li>
-                    <li>Use good lighting to ensure clarity</li>
-                    <li>Write on plain white paper for best results</li>
-                    <li>Make sure the entire sample is visible in the image</li>
+                    <li>Write on plain white paper with a black or blue pen</li>
+                    <li>Ensure good lighting - no shadows on the paper</li>
+                    <li>Write naturally - don't try to make it look perfect</li>
+                    <li>Include ALL letters, numbers, and sentences from the sample text</li>
+                    <li>Make sure the entire sample is clearly visible in the photo</li>
                   </ul>
                 </div>
               </div>
@@ -292,10 +427,16 @@ const StudentHandwriting = () => {
               <strong className="text-destructive">This action cannot be undone!</strong>
               <br /><br />
               Once you submit this handwriting sample, it will be permanently linked to your 
-              account and cannot be changed. Only an administrator can modify your handwriting 
-              sample after submission.
+              account and cannot be changed. The AI will extract your unique handwriting features 
+              for verification.
               <br /><br />
-              Are you absolutely sure you want to proceed?
+              Please verify that your sample contains:
+              <ul className="list-disc list-inside mt-2 text-sm">
+                <li>All capital letters (A-Z)</li>
+                <li>All lowercase letters (a-z)</li>
+                <li>All numbers (0-9)</li>
+                <li>The sample sentences</li>
+              </ul>
             </DialogDescription>
           </DialogHeader>
 
@@ -310,14 +451,19 @@ const StudentHandwriting = () => {
           )}
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={handleCancelUpload} disabled={uploading}>
+            <Button variant="outline" onClick={handleCancelUpload} disabled={uploading || extractingFeatures}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleUpload} disabled={uploading}>
+            <Button variant="destructive" onClick={handleUpload} disabled={uploading || extractingFeatures}>
               {uploading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />
                   Uploading...
+                </>
+              ) : extractingFeatures ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  Extracting Features...
                 </>
               ) : (
                 <>

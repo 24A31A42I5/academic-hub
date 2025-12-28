@@ -11,10 +11,31 @@ const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+interface HandwritingFeatures {
+  slant_angle: number;
+  stroke_width: number;
+  letter_height_ratio: number;
+  inter_letter_spacing: number;
+  inter_word_spacing: number;
+  baseline_stability: number;
+  letter_roundness: number;
+  connection_style: number;
+  pressure_variation: number;
+  character_consistency: number;
+}
+
 interface VerificationResult {
   similarity_score: number;
   confidence_score: number;
   risk_level: 'low' | 'medium' | 'high';
+  feature_comparison: {
+    [key: string]: {
+      reference: number;
+      submission: number;
+      difference: number;
+      match: boolean;
+    };
+  };
   analysis_details: {
     letter_formation: { match: boolean; notes: string };
     slant_angle: { match: boolean; notes: string };
@@ -26,12 +47,77 @@ interface VerificationResult {
   flagged_concerns: string[];
 }
 
+// Compute cosine similarity between two feature vectors
+function computeCosineSimilarity(a: HandwritingFeatures, b: HandwritingFeatures): number {
+  const keys = Object.keys(a) as (keyof HandwritingFeatures)[];
+  
+  // Normalize the features based on their ranges
+  const ranges: { [K in keyof HandwritingFeatures]: [number, number] } = {
+    slant_angle: [-45, 45],
+    stroke_width: [1, 10],
+    letter_height_ratio: [0.3, 0.9],
+    inter_letter_spacing: [1, 10],
+    inter_word_spacing: [1, 10],
+    baseline_stability: [1, 10],
+    letter_roundness: [1, 10],
+    connection_style: [0, 100],
+    pressure_variation: [1, 10],
+    character_consistency: [1, 10],
+  };
+
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (const key of keys) {
+    const [min, max] = ranges[key];
+    const range = max - min;
+    const normalizedA = (a[key] - min) / range;
+    const normalizedB = (b[key] - min) / range;
+    
+    dotProduct += normalizedA * normalizedB;
+    normA += normalizedA * normalizedA;
+    normB += normalizedB * normalizedB;
+  }
+
+  const similarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  return Math.round(similarity * 100);
+}
+
+// Compare features and determine which match
+function compareFeatures(reference: HandwritingFeatures, submission: HandwritingFeatures) {
+  const thresholds: { [K in keyof HandwritingFeatures]: number } = {
+    slant_angle: 10, // degrees
+    stroke_width: 2,
+    letter_height_ratio: 0.15,
+    inter_letter_spacing: 2,
+    inter_word_spacing: 2,
+    baseline_stability: 2,
+    letter_roundness: 2,
+    connection_style: 20, // percentage
+    pressure_variation: 2,
+    character_consistency: 2,
+  };
+
+  const comparison: VerificationResult['feature_comparison'] = {};
+  
+  for (const key of Object.keys(reference) as (keyof HandwritingFeatures)[]) {
+    const diff = Math.abs(reference[key] - submission[key]);
+    comparison[key] = {
+      reference: reference[key],
+      submission: submission[key],
+      difference: diff,
+      match: diff <= thresholds[key],
+    };
+  }
+
+  return comparison;
+}
+
 async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
   console.log('Fetching file:', url);
 
-  // Check if it's a Supabase storage URL that needs authenticated access
   if (url.includes('/storage/v1/object/public/uploads/') && supabase) {
-    // Extract the path from the URL for private bucket access
     const pathMatch = url.match(/\/uploads\/(.+)$/);
     if (pathMatch) {
       const filePath = pathMatch[1];
@@ -51,7 +137,6 @@ async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
     }
   }
 
-  // Fallback to regular fetch for public URLs
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch file: ${response.status}`);
@@ -90,37 +175,31 @@ serve(async (req) => {
     
     console.log('Starting handwriting verification for submission:', submission_id);
     console.log('File URL:', file_url);
-    console.log('File Type:', file_type);
     console.log('Student Profile ID:', student_profile_id);
 
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    // Create Supabase client
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Mark the submission as "pending verification" immediately so the UI never shows a false "Verified".
-    try {
-      await supabase
-        .from('submissions')
-        .update({
-          ai_risk_level: 'pending',
-          verified_at: null,
-          ai_similarity_score: null,
-          ai_confidence_score: null,
-          ai_flagged_sections: null,
-          ai_analysis_details: null,
-        })
-        .eq('id', submission_id);
-    } catch (e) {
-      console.error('Failed to set pending verification state:', e);
-    }
+    // Mark as pending immediately
+    await supabase
+      .from('submissions')
+      .update({
+        ai_risk_level: 'pending',
+        verified_at: null,
+        ai_similarity_score: null,
+        ai_confidence_score: null,
+        ai_flagged_sections: null,
+        ai_analysis_details: null,
+      })
+      .eq('id', submission_id);
 
-    // Fetch student's reference handwriting
+    // Fetch student's reference handwriting and features
     const { data: studentDetails, error: studentError } = await supabase
       .from('student_details')
-      .select('handwriting_url, profile_id')
+      .select('handwriting_url, handwriting_feature_embedding, handwriting_image_hash, profile_id')
       .eq('profile_id', student_profile_id)
       .single();
 
@@ -131,7 +210,6 @@ serve(async (req) => {
 
     if (!studentDetails?.handwriting_url) {
       console.log('No handwriting sample found for student');
-      // Update submission with unverified status
       await supabase
         .from('submissions')
         .update({
@@ -149,9 +227,10 @@ serve(async (req) => {
       });
     }
 
-    console.log('Reference handwriting URL:', studentDetails.handwriting_url);
+    const referenceFeatures = studentDetails.handwriting_feature_embedding as HandwritingFeatures | null;
+    console.log('Reference features available:', !!referenceFeatures);
 
-    // Fetch both files as base64
+    // Fetch both files
     const [referenceBase64, submissionBase64] = await Promise.all([
       fetchFileAsBase64(studentDetails.handwriting_url, supabase),
       fetchFileAsBase64(file_url, supabase),
@@ -160,148 +239,117 @@ serve(async (req) => {
     const referenceMimeType = getMimeType(studentDetails.handwriting_url);
     const submissionMimeType = getMimeType(file_url, file_type);
 
-    console.log('Reference MIME type:', referenceMimeType);
-    console.log('Submission MIME type:', submissionMimeType);
-
-    // Build the message content based on file types
-    const content: any[] = [
-      {
-        type: 'text',
-        text: `You are an expert forensic document examiner specializing in handwriting analysis and writer identification. You have been trained on the principles of graphology, questioned document examination, and pattern recognition.
+    // Build the AI prompt for feature extraction AND comparison
+    const analysisPrompt = `You are an expert forensic document examiner specializing in handwriting analysis and writer identification.
 
 ## TASK
 Compare the REFERENCE handwriting sample (Image 1) against the ASSIGNMENT submission (Image 2/Document) to determine if they were written by the SAME PERSON.
 
-## ANALYSIS METHODOLOGY
+## STEP 1: Extract Features from BOTH Samples
 
-### Phase 1: Document Classification
-First, determine what type of content is in each sample:
-- Is it handwritten, typed, printed, or a mix?
-- If the assignment is typed/printed, this is a CRITICAL FLAG.
+For EACH sample, extract these numerical features:
+1. **slant_angle** (-45 to +45 degrees): Angle of vertical strokes from true vertical
+2. **stroke_width** (1-10): Average thickness of pen strokes
+3. **letter_height_ratio** (0.3-0.9): x-height to total height ratio
+4. **inter_letter_spacing** (1-10): Space between letters
+5. **inter_word_spacing** (1-10): Space between words
+6. **baseline_stability** (1-10): How straight the baseline is
+7. **letter_roundness** (1-10): Angular vs rounded letters
+8. **connection_style** (0-100): Percentage of connected letters
+9. **pressure_variation** (1-10): Consistency of pen pressure
+10. **character_consistency** (1-10): How similar same letters look
 
-### Phase 2: Individual Character Analysis
-For handwritten content, examine these specific letter forms across BOTH samples:
-- **Lowercase letters**: a, d, e, g, o, s, t, r, n, m
-- **Uppercase letters**: A, B, D, E, M, N, S, T
-- **Number formations**: 0, 1, 2, 3, 4, 5, 7, 8, 9
-- **Special connections**: how letters connect (t-h, i-n, e-r patterns)
+## STEP 2: Visual Analysis
 
-### Phase 3: Class Characteristics (Taught patterns)
-- General style (cursive, print, mixed)
-- Slant direction and consistency (measure in degrees if possible)
-- Size consistency (x-height, ascender/descender ratios)
-- Baseline behavior (straight, wavy, ascending, descending)
-
-### Phase 4: Individual Characteristics (Personal habits)
-- **Pen lifts**: Where does the writer lift the pen within words?
-- **Entry/exit strokes**: How do letters begin and end?
-- **Unusual formations**: Personal quirks in specific letters
-- **i-dots and t-crosses**: Position, shape, and connection patterns
-- **Pressure patterns**: Thick/thin variations in strokes
-- **Speed indicators**: Smooth curves vs. angular hesitations
-
-### Phase 5: Comparison Conclusion
-- Count the number of MATCHING individual characteristics
-- Count the number of SIGNIFICANT DIFFERENCES
-- A single fundamental difference can indicate different writers
-- 8+ matching individual characteristics suggests same writer
+Examine these characteristics:
+- **Letter Formation**: How specific letters are constructed (a, d, e, g, o, s, t)
+- **Slant Angle**: Overall slant direction and consistency
+- **Spacing**: Between letters and words
+- **Baseline**: How straight/wavy the writing line is
+- **Unique Features**: Personal quirks, i-dots, t-crosses, etc.
 
 ## CRITICAL DETECTION FLAGS
-Watch for these RED FLAGS that indicate potential fraud:
-1. Assignment is TYPED but reference is handwritten = CRITICAL
-2. Completely different slant angle (e.g., 45° right vs. vertical) = HIGH RISK
-3. Different letter construction (e.g., one-stroke 'a' vs. two-stroke 'a') = HIGH RISK
-4. Inconsistent pen pressure patterns = MEDIUM RISK
-5. Different baseline behaviors = MEDIUM RISK
-6. Writing appears traced or unnaturally slow = HIGH RISK
+- Assignment is TYPED but reference is handwritten = CRITICAL (similarity < 20)
+- Completely different slant angle = HIGH RISK
+- Different letter construction methods = HIGH RISK
+- Inconsistent pressure patterns between samples = MEDIUM RISK
 
 ## OUTPUT FORMAT
 Respond with ONLY this JSON (no markdown, no extra text):
 
 {
+  "submission_features": {
+    "slant_angle": <number>,
+    "stroke_width": <number>,
+    "letter_height_ratio": <number>,
+    "inter_letter_spacing": <number>,
+    "inter_word_spacing": <number>,
+    "baseline_stability": <number>,
+    "letter_roundness": <number>,
+    "connection_style": <number>,
+    "pressure_variation": <number>,
+    "character_consistency": <number>
+  },
   "similarity_score": <0-100>,
   "confidence_score": <0-100>,
   "risk_level": "low" | "medium" | "high",
   "analysis_details": {
-    "letter_formation": {
-      "match": <true/false>,
-      "notes": "<Compare 3+ specific letters with detailed observations>"
-    },
-    "slant_angle": {
-      "match": <true/false>,
-      "notes": "<Measured angle comparison, e.g., 'Both samples show 15-20° rightward slant'>"
-    },
-    "spacing": {
-      "match": <true/false>,
-      "notes": "<Inter-letter and inter-word spacing comparison>"
-    },
-    "baseline": {
-      "match": <true/false>,
-      "notes": "<Baseline consistency and direction>"
-    },
-    "unique_features": {
-      "match": <true/false>,
-      "notes": "<List 2-3 distinctive personal characteristics found in both or only one sample>"
-    }
+    "letter_formation": { "match": <true/false>, "notes": "<detailed comparison>" },
+    "slant_angle": { "match": <true/false>, "notes": "<measured angle comparison>" },
+    "spacing": { "match": <true/false>, "notes": "<spacing comparison>" },
+    "baseline": { "match": <true/false>, "notes": "<baseline comparison>" },
+    "unique_features": { "match": <true/false>, "notes": "<unique characteristics>" }
   },
-  "overall_conclusion": "<Professional 2-3 sentence assessment with confidence level and recommendation>",
-  "flagged_concerns": ["<Specific concern 1>", "<Specific concern 2>"]
+  "overall_conclusion": "<2-3 sentence professional assessment>",
+  "flagged_concerns": ["<specific concern 1>", "<specific concern 2>"]
 }
 
 ## SCORING RUBRIC
-- **90-100**: Near-certain same writer (8+ matching individual characteristics, no significant differences)
-- **70-89**: Probable same writer (5-7 matching characteristics, minor differences explainable)
-- **50-69**: Inconclusive (mixed evidence, requires human expert review)
-- **30-49**: Probable different writer (significant differences noted)
-- **0-29**: Near-certain different writer OR typed/printed content
+- **85-100**: Same writer (8+ matching features, no significant differences)
+- **70-84**: Probable same writer (5-7 matching features)
+- **50-69**: Inconclusive (requires human review)
+- **30-49**: Probable different writer
+- **0-29**: Different writer OR typed content
 
-## RISK LEVEL ASSIGNMENT
-- "low": similarity_score >= 70 AND confidence_score >= 60
-- "medium": similarity_score 40-69 OR confidence_score 40-59
-- "high": similarity_score < 40 OR critical flags detected
+## RISK LEVEL
+- "low": similarity >= 85 AND confidence >= 70
+- "medium": similarity 50-84 OR confidence 40-69
+- "high": similarity < 50 OR critical flags detected
 
-BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
-      },
+BE STRICT. Academic integrity depends on accurate analysis.`;
+
+    const content: any[] = [
+      { type: 'text', text: analysisPrompt },
       {
         type: 'image_url',
-        image_url: {
-          url: `data:${referenceMimeType};base64,${referenceBase64}`
-        }
+        image_url: { url: `data:${referenceMimeType};base64,${referenceBase64}` }
       }
     ];
 
-    // Add submission file - for PDFs, Gemini can handle them directly
+    // Add submission
     if (submissionMimeType === 'application/pdf') {
       content.push({
         type: 'image_url',
-        image_url: {
-          url: `data:application/pdf;base64,${submissionBase64}`
-        }
+        image_url: { url: `data:application/pdf;base64,${submissionBase64}` }
       });
     } else if (submissionMimeType.startsWith('image/')) {
       content.push({
         type: 'image_url',
-        image_url: {
-          url: `data:${submissionMimeType};base64,${submissionBase64}`
-        }
+        image_url: { url: `data:${submissionMimeType};base64,${submissionBase64}` }
       });
     } else {
-      // For DOC/DOCX, we'll note this limitation
       content.push({
         type: 'text',
-        text: 'Note: The submission is a Word document. Please analyze any visible handwriting or note if the document appears to be typed.'
+        text: 'Note: The submission is a Word document. Analyze visible handwriting or note if typed.'
       });
       content.push({
         type: 'image_url',
-        image_url: {
-          url: `data:${submissionMimeType};base64,${submissionBase64}`
-        }
+        image_url: { url: `data:${submissionMimeType};base64,${submissionBase64}` }
       });
     }
 
     console.log('Calling Lovable AI for analysis...');
 
-    // Call Lovable AI with Gemini 2.5 Flash for faster vision analysis
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -310,12 +358,7 @@ BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
       },
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'user',
-            content: content
-          }
-        ],
+        messages: [{ role: 'user', content }],
       }),
     });
 
@@ -333,24 +376,21 @@ BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
     }
 
     const aiData = await aiResponse.json();
+    const responseText = aiData.choices?.[0]?.message?.content || '';
     console.log('AI Response received');
 
-    const responseText = aiData.choices?.[0]?.message?.content || '';
-    console.log('Raw AI response:', responseText);
-
-    // Parse the JSON response
-    let verificationResult: VerificationResult;
+    // Parse the response
+    let aiResult: any;
     try {
-      // Extract JSON from the response (in case there's extra text)
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('No JSON found in response');
       }
-      verificationResult = JSON.parse(jsonMatch[0]);
+      aiResult = JSON.parse(jsonMatch[0]);
     } catch (parseError) {
       console.error('Failed to parse AI response:', parseError);
-      // Create a fallback response
-      verificationResult = {
+      aiResult = {
+        submission_features: null,
         similarity_score: 50,
         confidence_score: 30,
         risk_level: 'medium',
@@ -361,14 +401,50 @@ BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
           baseline: { match: false, notes: 'Unable to parse detailed analysis' },
           unique_features: { match: false, notes: 'Unable to parse detailed analysis' },
         },
-        overall_conclusion: 'Analysis completed but detailed parsing failed. Manual review recommended.',
+        overall_conclusion: 'Analysis completed but parsing failed. Manual review recommended.',
         flagged_concerns: ['AI response parsing failed - manual review required'],
       };
     }
 
-    console.log('Verification result:', verificationResult);
+    // If we have reference features and submission features, compute our own similarity
+    let finalSimilarity = aiResult.similarity_score;
+    let featureComparison = null;
 
-    // Update the submission with verification results
+    if (referenceFeatures && aiResult.submission_features) {
+      const computedSimilarity = computeCosineSimilarity(referenceFeatures, aiResult.submission_features);
+      featureComparison = compareFeatures(referenceFeatures, aiResult.submission_features);
+      
+      // Average AI similarity with computed similarity for more robust result
+      finalSimilarity = Math.round((aiResult.similarity_score + computedSimilarity) / 2);
+      
+      console.log('Computed similarity:', computedSimilarity);
+      console.log('AI similarity:', aiResult.similarity_score);
+      console.log('Final similarity:', finalSimilarity);
+    }
+
+    // Determine final risk level based on final similarity
+    let riskLevel: 'low' | 'medium' | 'high';
+    if (finalSimilarity >= 85 && aiResult.confidence_score >= 70) {
+      riskLevel = 'low';
+    } else if (finalSimilarity >= 50 || aiResult.confidence_score >= 40) {
+      riskLevel = 'medium';
+    } else {
+      riskLevel = 'high';
+    }
+
+    const verificationResult: VerificationResult = {
+      similarity_score: finalSimilarity,
+      confidence_score: aiResult.confidence_score,
+      risk_level: riskLevel,
+      feature_comparison: featureComparison || {},
+      analysis_details: aiResult.analysis_details,
+      overall_conclusion: aiResult.overall_conclusion,
+      flagged_concerns: aiResult.flagged_concerns || [],
+    };
+
+    console.log('Final verification result:', verificationResult);
+
+    // Update submission
     const { error: updateError } = await supabase
       .from('submissions')
       .update({
@@ -383,23 +459,21 @@ BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
 
     if (updateError) {
       console.error('Error updating submission:', updateError);
-      throw new Error('Failed to update submission with verification results');
+      throw new Error('Failed to update submission');
     }
 
     console.log('Submission updated successfully');
 
-    // Send email notification if submission is flagged (high or medium risk)
+    // Send notification if flagged
     if (verificationResult.risk_level === 'high' || verificationResult.risk_level === 'medium') {
       console.log('Submission flagged, sending notification...');
       
-      // Fetch student info for email
       const { data: profileData } = await supabase
         .from('profiles')
         .select('email, full_name')
         .eq('id', student_profile_id)
         .single();
       
-      // Fetch assignment title
       const { data: submissionData } = await supabase
         .from('submissions')
         .select('assignment:assignments(title)')
@@ -408,7 +482,7 @@ BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
       
       if (profileData?.email) {
         try {
-          const notifyResponse = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
+          await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -426,12 +500,8 @@ BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
               },
             }),
           });
-          
-          const notifyResult = await notifyResponse.json();
-          console.log('Notification result:', notifyResult);
         } catch (notifyError) {
           console.error('Failed to send notification:', notifyError);
-          // Don't fail the main function if notification fails
         }
       }
     }
@@ -444,7 +514,7 @@ BE STRICT AND PRECISE. Academic integrity depends on accurate analysis.`
     });
 
   } catch (error) {
-    console.error('Error in verify-handwriting function:', error);
+    console.error('Error in verify-handwriting:', error);
     return new Response(JSON.stringify({ 
       error: error instanceof Error ? error.message : 'Unknown error' 
     }), {
