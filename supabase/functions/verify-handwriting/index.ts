@@ -114,9 +114,13 @@ function compareFeatures(reference: HandwritingFeatures, submission: Handwriting
   return comparison;
 }
 
+// Maximum file size in bytes (5MB to stay well under memory limits)
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
 async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
   console.log('Fetching file:', url);
 
+  // For uploads bucket (private files)
   if (url.includes('/storage/v1/object/public/uploads/') && supabase) {
     const pathMatch = url.match(/\/uploads\/(.+)$/);
     if (pathMatch) {
@@ -133,16 +137,35 @@ async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
       }
 
       const arrayBuffer = await data.arrayBuffer();
-      return encode(arrayBuffer);
+      
+      // Check file size
+      if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
+        console.log(`File too large (${Math.round(arrayBuffer.byteLength / 1024 / 1024)}MB), using first ${MAX_FILE_SIZE / 1024 / 1024}MB only`);
+        // For PDFs, we can only analyze the first few pages anyway
+        const truncated = arrayBuffer.slice(0, MAX_FILE_SIZE);
+        return encode(new Uint8Array(truncated));
+      }
+      
+      return encode(new Uint8Array(arrayBuffer));
     }
   }
 
+  // For public files or handwriting samples
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch file: ${response.status}`);
   }
+  
   const arrayBuffer = await response.arrayBuffer();
-  return encode(arrayBuffer);
+  
+  // Check file size
+  if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
+    console.log(`File too large (${Math.round(arrayBuffer.byteLength / 1024 / 1024)}MB), using first ${MAX_FILE_SIZE / 1024 / 1024}MB only`);
+    const truncated = arrayBuffer.slice(0, MAX_FILE_SIZE);
+    return encode(new Uint8Array(truncated));
+  }
+  
+  return encode(new Uint8Array(arrayBuffer));
 }
 
 function getMimeType(url: string, fileType?: string): string {
