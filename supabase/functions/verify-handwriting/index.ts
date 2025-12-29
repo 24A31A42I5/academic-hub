@@ -187,13 +187,26 @@ function getMimeType(url: string, fileType?: string): string {
   }
 }
 
+// Maximum file size for reliable processing (1.5MB to stay well under memory limits)
+const PROCESSING_FILE_LIMIT = 1.5 * 1024 * 1024;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Parse request body first for error handling
+  let submission_id: string | undefined;
+  let file_url: string | undefined;
+  let file_type: string | undefined;
+  let student_profile_id: string | undefined;
+
   try {
-    const { submission_id, file_url, file_type, student_profile_id } = await req.json();
+    const body = await req.json();
+    submission_id = body.submission_id;
+    file_url = body.file_url;
+    file_type = body.file_type;
+    student_profile_id = body.student_profile_id;
     
     console.log('Starting handwriting verification for submission:', submission_id);
     console.log('File URL:', file_url);
@@ -204,6 +217,44 @@ serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // ===== PRE-CHECK: Get file size before processing =====
+    try {
+      const headResponse = await fetch(file_url!, { method: 'HEAD' });
+      const contentLength = headResponse.headers.get('content-length');
+      
+      if (contentLength) {
+        const fileSize = parseInt(contentLength, 10);
+        console.log('File size from HEAD request:', fileSize, 'bytes');
+        
+        if (fileSize > 8 * 1024 * 1024) { // Files over 8MB will definitely fail
+          console.log('File too large for verification, marking as needs_manual_review');
+          
+          await supabase
+            .from('submissions')
+            .update({
+              ai_risk_level: 'needs_manual_review',
+              ai_analysis_details: { 
+                error: 'File too large for automatic verification (>8MB)',
+                file_size_mb: Math.round(fileSize / 1024 / 1024),
+                needs_manual_review: true 
+              },
+              verified_at: new Date().toISOString(),
+            })
+            .eq('id', submission_id);
+          
+          return new Response(JSON.stringify({ 
+            success: false, 
+            message: 'File too large for automatic verification. Marked for manual review.' 
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+    } catch (headErr) {
+      console.log('HEAD request failed, continuing with processing:', headErr);
+      // Continue anyway - some storage services don't support HEAD
+    }
 
     // Mark as pending immediately
     await supabase
@@ -255,11 +306,11 @@ serve(async (req) => {
     // Fetch both files
     const [referenceBase64, submissionBase64] = await Promise.all([
       fetchFileAsBase64(studentDetails.handwriting_url, supabase),
-      fetchFileAsBase64(file_url, supabase),
+      fetchFileAsBase64(file_url!, supabase),
     ]);
 
     const referenceMimeType = getMimeType(studentDetails.handwriting_url);
-    const submissionMimeType = getMimeType(file_url, file_type);
+    const submissionMimeType = getMimeType(file_url!, file_type);
 
     // Build the AI prompt for feature extraction AND comparison
     const analysisPrompt = `You are an expert forensic document examiner specializing in handwriting analysis and writer identification.
