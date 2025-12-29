@@ -114,8 +114,8 @@ function compareFeatures(reference: HandwritingFeatures, submission: Handwriting
   return comparison;
 }
 
-// Maximum file size in bytes (5MB to stay well under memory limits)
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
+// Maximum file size in bytes (3MB to stay well under memory limits for edge functions)
+const MAX_FILE_SIZE = 3 * 1024 * 1024;
 
 async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
   console.log('Fetching file:', url);
@@ -537,6 +537,28 @@ BE STRICT. Academic integrity depends on accurate analysis.`;
 
   } catch (error) {
     console.error('Error in verify-handwriting:', error);
+    
+    // Try to mark the submission as failed so it doesn't stay stuck in pending
+    try {
+      const { submission_id } = await req.clone().json();
+      if (submission_id) {
+        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+        await supabase
+          .from('submissions')
+          .update({
+            ai_risk_level: 'failed',
+            ai_analysis_details: { 
+              error: error instanceof Error ? error.message : 'Unknown error',
+              failed_at: new Date().toISOString()
+            },
+            verified_at: new Date().toISOString(),
+          })
+          .eq('id', submission_id);
+      }
+    } catch (updateErr) {
+      console.error('Failed to mark submission as failed:', updateErr);
+    }
+    
     return new Response(JSON.stringify({ 
       error: error instanceof Error ? error.message : 'Unknown error' 
     }), {
