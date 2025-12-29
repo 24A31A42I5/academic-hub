@@ -138,15 +138,14 @@ async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
 
       const arrayBuffer = await data.arrayBuffer();
       
-      // Check file size
+      // Check file size - truncate if too large to avoid memory issues
       if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
         console.log(`File too large (${Math.round(arrayBuffer.byteLength / 1024 / 1024)}MB), using first ${MAX_FILE_SIZE / 1024 / 1024}MB only`);
-        // For PDFs, we can only analyze the first few pages anyway
         const truncated = arrayBuffer.slice(0, MAX_FILE_SIZE);
-        return encode(new Uint8Array(truncated));
+        return encode(truncated);
       }
       
-      return encode(new Uint8Array(arrayBuffer));
+      return encode(arrayBuffer);
     }
   }
 
@@ -158,14 +157,14 @@ async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
   
   const arrayBuffer = await response.arrayBuffer();
   
-  // Check file size
+  // Check file size - truncate if too large
   if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
     console.log(`File too large (${Math.round(arrayBuffer.byteLength / 1024 / 1024)}MB), using first ${MAX_FILE_SIZE / 1024 / 1024}MB only`);
     const truncated = arrayBuffer.slice(0, MAX_FILE_SIZE);
-    return encode(new Uint8Array(truncated));
+    return encode(truncated);
   }
   
-  return encode(new Uint8Array(arrayBuffer));
+  return encode(arrayBuffer);
 }
 
 function getMimeType(url: string, fileType?: string): string {
