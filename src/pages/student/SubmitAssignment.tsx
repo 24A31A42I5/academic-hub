@@ -106,6 +106,14 @@ const SubmitAssignment = () => {
       return;
     }
 
+    // Warn about large files that may have verification issues
+    if (file.size > 5 * 1024 * 1024) {
+      toast.warning(
+        'Large file detected. Handwriting verification may require manual review.',
+        { duration: 5000 }
+      );
+    }
+
     setSelectedFile(file);
   };
 

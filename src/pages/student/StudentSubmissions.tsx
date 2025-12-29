@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -8,8 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle } from 'lucide-react';
+import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 const navItems = [
   { label: 'Overview', href: '/student', icon: DashboardIcons.Home },
@@ -53,45 +54,52 @@ const StudentSubmissions = () => {
     }
   }, [profile, authLoading, navigate]);
 
+  const fetchSubmissions = useCallback(async () => {
+    if (!profile) return;
+    
+    const { data, error } = await supabase
+      .from('submissions')
+      .select(`
+        id,
+        file_url,
+        file_type,
+        status,
+        marks,
+        feedback,
+        is_late,
+        submitted_at,
+        verified_at,
+        ai_risk_level,
+        assignment:assignments (
+          id,
+          title,
+          year,
+          branch,
+          section,
+          deadline
+        )
+      `)
+      .eq('student_profile_id', profile.id)
+      .order('submitted_at', { ascending: false });
+
+    if (!error && data) {
+      setSubmissions(data as unknown as Submission[]);
+    }
+  }, [profile]);
+
   useEffect(() => {
     const fetchData = async () => {
       if (!profile) return;
 
       try {
-        const [detailsRes, submissionsRes] = await Promise.all([
-          supabase
-            .from('student_details')
-            .select('*')
-            .eq('profile_id', profile.id)
-            .maybeSingle(),
-          supabase
-            .from('submissions')
-            .select(`
-              id,
-              file_url,
-              file_type,
-              status,
-              marks,
-              feedback,
-              is_late,
-              submitted_at,
-              verified_at,
-              ai_risk_level,
-              assignment:assignments (
-                id,
-                title,
-                year,
-                branch,
-                section,
-                deadline
-              )
-            `)
-            .eq('student_profile_id', profile.id)
-            .order('submitted_at', { ascending: false }),
-        ]);
+        const { data: detailsRes } = await supabase
+          .from('student_details')
+          .select('*')
+          .eq('profile_id', profile.id)
+          .maybeSingle();
 
-        setStudentDetails(detailsRes.data);
-        setSubmissions(submissionsRes.data as unknown as Submission[] || []);
+        setStudentDetails(detailsRes);
+        await fetchSubmissions();
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -102,6 +110,54 @@ const StudentSubmissions = () => {
     if (profile?.role === 'student') {
       fetchData();
     }
+  }, [profile, fetchSubmissions]);
+
+  // Real-time subscription for verification status updates
+  useEffect(() => {
+    if (!profile) return;
+
+    const channel = supabase
+      .channel('submission-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'submissions',
+          filter: `student_profile_id=eq.${profile.id}`,
+        },
+        (payload) => {
+          console.log('Submission updated:', payload);
+          const updated = payload.new as any;
+          
+          // Update the local state with the new data
+          setSubmissions(prev => 
+            prev.map(sub => 
+              sub.id === updated.id 
+                ? { ...sub, ...updated }
+                : sub
+            )
+          );
+
+          // Show toast notification for verification completion
+          if (updated.verified_at && updated.ai_risk_level) {
+            if (updated.ai_risk_level === 'low') {
+              toast.success('Verification complete: Handwriting verified!');
+            } else if (updated.ai_risk_level === 'medium') {
+              toast.info('Verification complete: Under review');
+            } else if (updated.ai_risk_level === 'high') {
+              toast.warning('Verification complete: Flagged for review');
+            } else if (updated.ai_risk_level === 'failed' || updated.ai_risk_level === 'needs_manual_review') {
+              toast.info('Verification requires manual review');
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [profile]);
 
   const getVerificationBadge = (submission: Submission) => {
@@ -179,6 +235,21 @@ const StudentSubmissions = () => {
             </TooltipTrigger>
             <TooltipContent>
               <p>Upload your handwriting sample to enable verification</p>
+            </TooltipContent>
+          </Tooltip>
+        );
+      case 'failed':
+      case 'needs_manual_review':
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge variant="secondary" className="gap-1">
+                <RefreshCw className="w-3 h-3" />
+                Manual Review
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>File too large for automatic verification - awaiting manual review</p>
             </TooltipContent>
           </Tooltip>
         );
