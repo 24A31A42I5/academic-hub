@@ -143,26 +143,28 @@ const SubmitAssignment = () => {
       // Check if deadline passed
       const isLate = isPast(new Date(assignment.deadline));
 
+      // Base submission data (DRY)
+      const baseSubmission = {
+        file_url: publicUrl,
+        file_type: selectedFile.type,
+        submitted_at: new Date().toISOString(),
+        is_late: isLate,
+        status: 'pending',
+        ai_similarity_score: null,
+        ai_confidence_score: null,
+        ai_risk_level: 'pending',
+        ai_flagged_sections: null,
+        ai_analysis_details: null,
+        verified_at: null,
+      };
+
       let submissionId: string;
 
       // Create or update submission
       if (existingSubmission) {
         const { error } = await supabase
           .from('submissions')
-          .update({
-            file_url: publicUrl,
-            file_type: selectedFile.type,
-            submitted_at: new Date().toISOString(),
-            is_late: isLate,
-            status: 'pending',
-            // Reset AI verification for re-submissions
-            ai_similarity_score: null,
-            ai_confidence_score: null,
-            ai_risk_level: 'pending',
-            ai_flagged_sections: null,
-            ai_analysis_details: null,
-            verified_at: null,
-          })
+          .update(baseSubmission)
           .eq('id', existingSubmission.id);
 
         if (error) throw error;
@@ -171,19 +173,9 @@ const SubmitAssignment = () => {
         const { data: newSubmission, error } = await supabase
           .from('submissions')
           .insert({
+            ...baseSubmission,
             assignment_id: assignment.id,
             student_profile_id: profile.id,
-            file_url: publicUrl,
-            file_type: selectedFile.type,
-            is_late: isLate,
-            status: 'pending',
-            // Ensure the UI never shows “Verified” before verification actually ran
-            ai_risk_level: 'pending',
-            verified_at: null,
-            ai_similarity_score: null,
-            ai_confidence_score: null,
-            ai_flagged_sections: null,
-            ai_analysis_details: null,
           })
           .select('id')
           .single();
@@ -193,7 +185,7 @@ const SubmitAssignment = () => {
       }
 
       // Trigger AI handwriting verification (non-blocking)
-      toast.success('Assignment submitted! Verifying handwriting...');
+      toast.success('Assignment submitted! AI verification started.');
       
       supabase.functions.invoke('verify-handwriting', {
         body: {
@@ -205,19 +197,19 @@ const SubmitAssignment = () => {
        }).then(({ error }) => {
          if (error) {
            console.error('Verification error:', error);
-           toast.error('Handwriting verification failed — please try re-submitting.');
+           toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
          } else {
            console.log('Handwriting verification completed');
          }
        }).catch((err) => {
          console.error('Verification failed:', err);
-         toast.error('Handwriting verification failed — please try re-submitting.');
+         toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
        });
 
       navigate('/student/submissions');
     } catch (error: any) {
       console.error('Error submitting assignment:', error);
-      toast.error(error.message || 'Failed to submit assignment');
+      toast.error(error.message || 'Failed to submit assignment. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -393,7 +385,7 @@ const SubmitAssignment = () => {
                     Choose File
                   </Button>
                   <p className="text-xs text-muted-foreground mt-4">
-                    Max file size: 10MB
+                    Max file size: 10MB. Handwriting will be verified automatically by our AI system.
                   </p>
                 </>
               )}

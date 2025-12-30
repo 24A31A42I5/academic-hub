@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -19,6 +19,9 @@ const navItems = [
   { label: 'My Handwriting', href: '/student/handwriting', icon: DashboardIcons.FileText },
   { label: 'Grades', href: '/student/grades', icon: DashboardIcons.CheckCircle },
 ];
+
+// Client-side timeout for verification (5 minutes)
+const VERIFICATION_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface Submission {
   id: string;
@@ -141,14 +144,25 @@ const StudentSubmissions = () => {
 
           // Show toast notification for verification completion
           if (updated.verified_at && updated.ai_risk_level) {
-            if (updated.ai_risk_level === 'low') {
-              toast.success('Verification complete: Handwriting verified!');
-            } else if (updated.ai_risk_level === 'medium') {
-              toast.info('Verification complete: Under review');
-            } else if (updated.ai_risk_level === 'high') {
-              toast.warning('Verification complete: Flagged for review');
-            } else if (updated.ai_risk_level === 'failed' || updated.ai_risk_level === 'needs_manual_review') {
-              toast.info('Verification requires manual review');
+            switch (updated.ai_risk_level) {
+              case 'low':
+                toast.success('Verification complete: Handwriting verified!');
+                break;
+              case 'medium':
+                toast.info('Verification complete: Under review');
+                break;
+              case 'high':
+                toast.warning('Verification complete: Flagged for review');
+                break;
+              case 'unverified':
+                toast.info('Verification skipped: No handwriting sample on file.');
+                break;
+              case 'failed':
+                toast.error('Verification error: Automatic analysis failed, manual review required.');
+                break;
+              case 'needs_manual_review':
+                toast.info('Verification complete: Awaiting manual review.');
+                break;
             }
           }
         }
@@ -161,9 +175,29 @@ const StudentSubmissions = () => {
   }, [profile]);
 
   const getVerificationBadge = (submission: Submission) => {
-    // Only show “Verified/Flagged/etc.” after the verification job has actually finished.
     const hasVerificationResult = !!submission.verified_at;
     const level = submission.ai_risk_level;
+
+    // Check for client-side timeout (5 minutes without verification)
+    if (!hasVerificationResult && submission.submitted_at) {
+      const submittedTime = new Date(submission.submitted_at).getTime();
+      const now = Date.now();
+      if (now - submittedTime > VERIFICATION_TIMEOUT_MS) {
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge variant="secondary" className="gap-1">
+                <RefreshCw className="w-3 h-3" />
+                Manual Review
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Verification timed out - awaiting manual review</p>
+            </TooltipContent>
+          </Tooltip>
+        );
+      }
+    }
 
     if (!hasVerificationResult || !level || level === 'pending') {
       return (
@@ -181,7 +215,7 @@ const StudentSubmissions = () => {
       );
     }
 
-    switch (submission.ai_risk_level) {
+    switch (level) {
       case 'low':
         return (
           <Tooltip>
@@ -200,7 +234,7 @@ const StudentSubmissions = () => {
         return (
           <Tooltip>
             <TooltipTrigger>
-              <Badge className="bg-warning/10 text-warning gap-1">
+              <Badge className="bg-yellow-500/10 text-yellow-600 gap-1">
                 <AlertTriangle className="w-3 h-3" />
                 Under Review
               </Badge>
@@ -239,17 +273,30 @@ const StudentSubmissions = () => {
           </Tooltip>
         );
       case 'failed':
+        return (
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge variant="secondary" className="bg-red-500/10 text-red-600 gap-1">
+                <XCircle className="w-3 h-3" />
+                AI Error
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Automatic verification failed due to a technical issue</p>
+            </TooltipContent>
+          </Tooltip>
+        );
       case 'needs_manual_review':
         return (
           <Tooltip>
             <TooltipTrigger>
               <Badge variant="secondary" className="gap-1">
                 <RefreshCw className="w-3 h-3" />
-                Manual Review
+                Needs Review
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>File too large for automatic verification - awaiting manual review</p>
+              <p>File too large or complex for automatic verification</p>
             </TooltipContent>
           </Tooltip>
         );
