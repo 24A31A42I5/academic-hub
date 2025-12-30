@@ -47,11 +47,13 @@ interface VerificationResult {
   flagged_concerns: string[];
 }
 
+// Critical keywords that indicate potential issues
+const CRITICAL_FLAGS = ['typed', 'different writer', 'forgery', 'high risk', 'not handwritten', 'computer generated'];
+
 // Compute cosine similarity between two feature vectors
 function computeCosineSimilarity(a: HandwritingFeatures, b: HandwritingFeatures): number {
   const keys = Object.keys(a) as (keyof HandwritingFeatures)[];
   
-  // Normalize the features based on their ranges
   const ranges: { [K in keyof HandwritingFeatures]: [number, number] } = {
     slant_angle: [-45, 45],
     stroke_width: [1, 10],
@@ -87,14 +89,14 @@ function computeCosineSimilarity(a: HandwritingFeatures, b: HandwritingFeatures)
 // Compare features and determine which match
 function compareFeatures(reference: HandwritingFeatures, submission: HandwritingFeatures) {
   const thresholds: { [K in keyof HandwritingFeatures]: number } = {
-    slant_angle: 10, // degrees
+    slant_angle: 10,
     stroke_width: 2,
     letter_height_ratio: 0.15,
     inter_letter_spacing: 2,
     inter_word_spacing: 2,
     baseline_stability: 2,
     letter_roundness: 2,
-    connection_style: 20, // percentage
+    connection_style: 20,
     pressure_variation: 2,
     character_consistency: 2,
   };
@@ -112,6 +114,14 @@ function compareFeatures(reference: HandwritingFeatures, submission: Handwriting
   }
 
   return comparison;
+}
+
+// Check for critical flags in flagged concerns
+function hasCriticalFlags(flaggedConcerns: string[]): boolean {
+  if (!flaggedConcerns || flaggedConcerns.length === 0) return false;
+  
+  const concernsLower = flaggedConcerns.map(c => c.toLowerCase()).join(' ');
+  return CRITICAL_FLAGS.some(flag => concernsLower.includes(flag));
 }
 
 // Maximum file size in bytes (3MB to stay well under memory limits for edge functions)
@@ -138,7 +148,6 @@ async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
 
       const arrayBuffer = await data.arrayBuffer();
       
-      // Check file size - truncate if too large to avoid memory issues
       if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
         console.log(`File too large (${Math.round(arrayBuffer.byteLength / 1024 / 1024)}MB), using first ${MAX_FILE_SIZE / 1024 / 1024}MB only`);
         const truncated = arrayBuffer.slice(0, MAX_FILE_SIZE);
@@ -157,7 +166,6 @@ async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
   
   const arrayBuffer = await response.arrayBuffer();
   
-  // Check file size - truncate if too large
   if (arrayBuffer.byteLength > MAX_FILE_SIZE) {
     console.log(`File too large (${Math.round(arrayBuffer.byteLength / 1024 / 1024)}MB), using first ${MAX_FILE_SIZE / 1024 / 1024}MB only`);
     const truncated = arrayBuffer.slice(0, MAX_FILE_SIZE);
@@ -187,9 +195,6 @@ function getMimeType(url: string, fileType?: string): string {
   }
 }
 
-// Maximum file size for reliable processing (1.5MB to stay well under memory limits)
-const PROCESSING_FILE_LIMIT = 1.5 * 1024 * 1024;
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -216,18 +221,47 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
+    if (!submission_id || !file_url || !student_profile_id) {
+      throw new Error('Missing required parameters: submission_id, file_url, student_profile_id');
+    }
+
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // ===== IDEMPOTENCY CHECK: Skip if already processed =====
+    const { data: existingSubmission, error: fetchError } = await supabase
+      .from('submissions')
+      .select('ai_risk_level, verified_at')
+      .eq('id', submission_id)
+      .single();
+
+    if (fetchError) {
+      console.error('Error fetching submission:', fetchError);
+      throw new Error('Failed to fetch submission');
+    }
+
+    // If already processed (not pending and has verified_at), return early
+    if (existingSubmission?.ai_risk_level && 
+        existingSubmission.ai_risk_level !== 'pending' && 
+        existingSubmission.verified_at) {
+      console.log('Submission already processed, skipping:', existingSubmission.ai_risk_level);
+      return new Response(JSON.stringify({ 
+        status: 'already_processed',
+        risk_level: existingSubmission.ai_risk_level
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // ===== PRE-CHECK: Get file size before processing =====
     try {
-      const headResponse = await fetch(file_url!, { method: 'HEAD' });
+      const headResponse = await fetch(file_url, { method: 'HEAD' });
       const contentLength = headResponse.headers.get('content-length');
       
       if (contentLength) {
         const fileSize = parseInt(contentLength, 10);
         console.log('File size from HEAD request:', fileSize, 'bytes');
         
-        if (fileSize > 8 * 1024 * 1024) { // Files over 8MB will definitely fail
+        if (fileSize > 8 * 1024 * 1024) {
           console.log('File too large for verification, marking as needs_manual_review');
           
           await supabase
@@ -253,7 +287,6 @@ serve(async (req) => {
       }
     } catch (headErr) {
       console.log('HEAD request failed, continuing with processing:', headErr);
-      // Continue anyway - some storage services don't support HEAD
     }
 
     // Mark as pending immediately
@@ -306,11 +339,11 @@ serve(async (req) => {
     // Fetch both files
     const [referenceBase64, submissionBase64] = await Promise.all([
       fetchFileAsBase64(studentDetails.handwriting_url, supabase),
-      fetchFileAsBase64(file_url!, supabase),
+      fetchFileAsBase64(file_url, supabase),
     ]);
 
     const referenceMimeType = getMimeType(studentDetails.handwriting_url);
-    const submissionMimeType = getMimeType(file_url!, file_type);
+    const submissionMimeType = getMimeType(file_url, file_type);
 
     // Build the AI prompt for feature extraction AND comparison
     const analysisPrompt = `You are an expert forensic document examiner specializing in handwriting analysis and writer identification.
@@ -378,16 +411,16 @@ Respond with ONLY this JSON (no markdown, no extra text):
 }
 
 ## SCORING RUBRIC
-- **85-100**: Same writer (8+ matching features, no significant differences)
-- **70-84**: Probable same writer (5-7 matching features)
+- **90-100**: Same writer (9+ matching features, no significant differences)
+- **70-89**: Probable same writer (6-8 matching features)
 - **50-69**: Inconclusive (requires human review)
 - **30-49**: Probable different writer
 - **0-29**: Different writer OR typed content
 
 ## RISK LEVEL
-- "low": similarity >= 85 AND confidence >= 70
-- "medium": similarity 50-84 OR confidence 40-69
-- "high": similarity < 50 OR critical flags detected
+- "low": similarity >= 90 AND confidence >= 80
+- "medium": similarity >= 70 AND confidence >= 50
+- "high": similarity < 70 OR confidence < 50 OR critical flags detected
 
 BE STRICT. Academic integrity depends on accurate analysis.`;
 
@@ -462,11 +495,12 @@ BE STRICT. Academic integrity depends on accurate analysis.`;
       aiResult = JSON.parse(jsonMatch[0]);
     } catch (parseError) {
       console.error('Failed to parse AI response:', parseError);
+      // On parse error, default to HIGH risk for safety
       aiResult = {
         submission_features: null,
-        similarity_score: 50,
-        confidence_score: 30,
-        risk_level: 'medium',
+        similarity_score: 10,
+        confidence_score: 10,
+        risk_level: 'high',
         analysis_details: {
           letter_formation: { match: false, notes: 'Unable to parse detailed analysis' },
           slant_angle: { match: false, notes: 'Unable to parse detailed analysis' },
@@ -474,7 +508,7 @@ BE STRICT. Academic integrity depends on accurate analysis.`;
           baseline: { match: false, notes: 'Unable to parse detailed analysis' },
           unique_features: { match: false, notes: 'Unable to parse detailed analysis' },
         },
-        overall_conclusion: 'Analysis completed but parsing failed. Manual review recommended.',
+        overall_conclusion: 'Analysis completed but parsing failed. Manual review required.',
         flagged_concerns: ['AI response parsing failed - manual review required'],
       };
     }
@@ -495,13 +529,23 @@ BE STRICT. Academic integrity depends on accurate analysis.`;
       console.log('Final similarity:', finalSimilarity);
     }
 
-    // Determine final risk level based on final similarity
+    // Check for critical flags
+    const criticalFlagsDetected = hasCriticalFlags(aiResult.flagged_concerns || []);
+    console.log('Critical flags detected:', criticalFlagsDetected);
+
+    // Determine final risk level with STRICTER thresholds
     let riskLevel: 'low' | 'medium' | 'high';
-    if (finalSimilarity >= 85 && aiResult.confidence_score >= 70) {
+    if (criticalFlagsDetected) {
+      // Any critical flag = high risk
+      riskLevel = 'high';
+    } else if (finalSimilarity >= 90 && aiResult.confidence_score >= 80) {
+      // Stricter threshold for low risk
       riskLevel = 'low';
-    } else if (finalSimilarity >= 50 || aiResult.confidence_score >= 40) {
+    } else if (finalSimilarity >= 70 && aiResult.confidence_score >= 50) {
+      // Medium range
       riskLevel = 'medium';
     } else {
+      // Everything else is high risk
       riskLevel = 'high';
     }
 
@@ -589,10 +633,9 @@ BE STRICT. Academic integrity depends on accurate analysis.`;
   } catch (error) {
     console.error('Error in verify-handwriting:', error);
     
-    // Try to mark the submission as failed so it doesn't stay stuck in pending
-    try {
-      const { submission_id } = await req.clone().json();
-      if (submission_id) {
+    // Use the submission_id from the outer scope (already parsed)
+    if (submission_id) {
+      try {
         const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
         await supabase
           .from('submissions')
@@ -605,9 +648,9 @@ BE STRICT. Academic integrity depends on accurate analysis.`;
             verified_at: new Date().toISOString(),
           })
           .eq('id', submission_id);
+      } catch (updateErr) {
+        console.error('Failed to mark submission as failed:', updateErr);
       }
-    } catch (updateErr) {
-      console.error('Failed to mark submission as failed:', updateErr);
     }
     
     return new Response(JSON.stringify({ 
