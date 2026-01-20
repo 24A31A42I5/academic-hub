@@ -1,7 +1,7 @@
 project_id = "dgbjcjcxdiyugbcbkrpp"
 
 [functions.send-notification]
-verify_jwt = true
+verify_jwt = false
 
 [functions.bulk-create-faculty]
 verify_jwt = true
@@ -13,4 +13,7 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.extract-handwriting-features]
+verify_jwt = false
+
+[functions.deadline-reminder]
 verify_jwt = false
