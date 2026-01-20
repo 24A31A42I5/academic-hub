@@ -134,6 +134,7 @@ export type Database = {
           email: string
           full_name: string
           id: string
+          phone_number: string | null
           role: Database["public"]["Enums"]["app_role"]
           user_id: string
         }
@@ -142,6 +143,7 @@ export type Database = {
           email: string
           full_name: string
           id?: string
+          phone_number?: string | null
           role: Database["public"]["Enums"]["app_role"]
           user_id: string
         }
@@ -150,6 +152,7 @@ export type Database = {
           email?: string
           full_name?: string
           id?: string
+          phone_number?: string | null
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
         }
@@ -166,6 +169,7 @@ export type Database = {
           handwriting_url: string | null
           has_logged_in: boolean | null
           id: string
+          phone_number: string | null
           profile_id: string
           roll_number: string
           section: string
@@ -182,6 +186,7 @@ export type Database = {
           handwriting_url?: string | null
           has_logged_in?: boolean | null
           id?: string
+          phone_number?: string | null
           profile_id: string
           roll_number: string
           section: string
@@ -198,6 +203,7 @@ export type Database = {
           handwriting_url?: string | null
           has_logged_in?: boolean | null
           id?: string
+          phone_number?: string | null
           profile_id?: string
           roll_number?: string
           section?: string
