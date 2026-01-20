@@ -129,11 +129,11 @@ const VerificationReportsPage = () => {
   const getRiskBadge = (level: string | null) => {
     switch (level) {
       case 'high':
-        return <Badge variant="destructive" className="gap-1"><AlertTriangle className="w-3 h-3" />High Risk</Badge>;
+        return <Badge variant="destructive" className="gap-1"><AlertTriangle className="w-3 h-3" />Reupload Required</Badge>;
       case 'medium':
-        return <Badge className="bg-warning text-warning-foreground gap-1"><AlertTriangle className="w-3 h-3" />Medium</Badge>;
+        return <Badge className="bg-warning text-warning-foreground gap-1"><AlertTriangle className="w-3 h-3" />Manual Review</Badge>;
       case 'low':
-        return <Badge className="bg-green-500/10 text-green-600 gap-1"><CheckCircle className="w-3 h-3" />Low Risk</Badge>;
+        return <Badge className="bg-green-500/10 text-green-600 gap-1"><CheckCircle className="w-3 h-3" />Verified</Badge>;
       case 'unverified':
         return <Badge variant="outline" className="gap-1"><Shield className="w-3 h-3" />Unverified</Badge>;
       default:
@@ -182,7 +182,7 @@ const VerificationReportsPage = () => {
             </div>
             <div>
               <p className="text-2xl font-bold">{stats.lowRisk}</p>
-              <p className="text-sm text-muted-foreground">Low Risk</p>
+              <p className="text-sm text-muted-foreground">Verified</p>
             </div>
           </CardContent>
         </Card>
@@ -193,7 +193,7 @@ const VerificationReportsPage = () => {
             </div>
             <div>
               <p className="text-2xl font-bold">{stats.mediumRisk}</p>
-              <p className="text-sm text-muted-foreground">Medium Risk</p>
+              <p className="text-sm text-muted-foreground">Manual Review</p>
             </div>
           </CardContent>
         </Card>
@@ -204,7 +204,7 @@ const VerificationReportsPage = () => {
             </div>
             <div>
               <p className="text-2xl font-bold">{stats.highRisk}</p>
-              <p className="text-sm text-muted-foreground">High Risk</p>
+              <p className="text-sm text-muted-foreground">Reupload Required</p>
             </div>
           </CardContent>
         </Card>
@@ -233,9 +233,9 @@ const VerificationReportsPage = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Risk Levels</SelectItem>
-              <SelectItem value="high">High Risk Only</SelectItem>
-              <SelectItem value="medium">Medium Risk Only</SelectItem>
-              <SelectItem value="low">Low Risk Only</SelectItem>
+              <SelectItem value="high">Reupload Required</SelectItem>
+              <SelectItem value="medium">Manual Review</SelectItem>
+              <SelectItem value="low">Verified</SelectItem>
               <SelectItem value="unverified">Unverified</SelectItem>
             </SelectContent>
           </Select>

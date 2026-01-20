@@ -319,6 +319,17 @@ const SubmitAssignment = () => {
           </Alert>
         )}
 
+        {/* Reupload Required Warning */}
+        {existingSubmission?.verified_at && existingSubmission?.ai_risk_level === 'high' && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Reupload Required</AlertTitle>
+            <AlertDescription>
+              Your last submission scored below 50 in handwriting verification. Please reupload a clear handwritten file.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Existing Submission */}
         {existingSubmission && (
           <Alert className="mb-6">

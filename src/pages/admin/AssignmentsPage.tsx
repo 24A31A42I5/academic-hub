@@ -145,11 +145,11 @@ const AssignmentsPage = () => {
   const getRiskBadge = (risk: string | null) => {
     switch (risk) {
       case 'high':
-        return <Badge className="bg-red-500/10 text-red-600"><AlertTriangle className="w-3 h-3 mr-1" />High</Badge>;
+        return <Badge className="bg-red-500/10 text-red-600"><AlertTriangle className="w-3 h-3 mr-1" />Reupload</Badge>;
       case 'medium':
-        return <Badge className="bg-orange-500/10 text-orange-600"><AlertTriangle className="w-3 h-3 mr-1" />Medium</Badge>;
+        return <Badge className="bg-orange-500/10 text-orange-600"><AlertTriangle className="w-3 h-3 mr-1" />Review</Badge>;
       default:
-        return <Badge className="bg-green-500/10 text-green-600"><CheckCircle className="w-3 h-3 mr-1" />Low</Badge>;
+        return <Badge className="bg-green-500/10 text-green-600"><CheckCircle className="w-3 h-3 mr-1" />Verified</Badge>;
     }
   };
 

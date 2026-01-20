@@ -30,6 +30,7 @@ const StudentDashboard = () => {
   const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState<Stats>({ totalAssignments: 0, submitted: 0, pending: 0, overdue: 0 });
+  const [verificationStats, setVerificationStats] = useState({ verified: 0, manualReview: 0, reuploadRequired: 0, verifying: 0 });
   const [studentDetails, setStudentDetails] = useState<any>(null);
   const [upcomingAssignments, setUpcomingAssignments] = useState<any[]>([]);
   const [recentSubmissions, setRecentSubmissions] = useState<any[]>([]);
@@ -75,6 +76,12 @@ const StudentDashboard = () => {
           .select('*, assignments(*)')
           .eq('student_profile_id', profile.id)
           .order('submitted_at', { ascending: false });
+
+        const verified = (submissions || []).filter(s => s.verified_at && s.ai_risk_level === 'low').length;
+        const manualReview = (submissions || []).filter(s => s.verified_at && s.ai_risk_level === 'medium').length;
+        const reuploadRequired = (submissions || []).filter(s => s.verified_at && s.ai_risk_level === 'high').length;
+        const verifying = (submissions || []).filter(s => !s.verified_at || !s.ai_risk_level || s.ai_risk_level === 'pending').length;
+        setVerificationStats({ verified, manualReview, reuploadRequired, verifying });
 
         const submittedIds = new Set(submissions?.map(s => s.assignment_id) || []);
         const now = new Date();
@@ -165,7 +172,7 @@ const StudentDashboard = () => {
       )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
         <StatsCard
           title="Total Assignments"
           value={stats.totalAssignments}
@@ -191,6 +198,19 @@ const StudentDashboard = () => {
           variant="warning"
         />
       </div>
+
+      {/* Verification Summary */}
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle className="text-lg">Handwriting Verification</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Badge variant="secondary">Verifying: {verificationStats.verifying}</Badge>
+          <Badge>Verified: {verificationStats.verified}</Badge>
+          <Badge variant="outline">Manual Review: {verificationStats.manualReview}</Badge>
+          <Badge variant="destructive">Reupload Required: {verificationStats.reuploadRequired}</Badge>
+        </CardContent>
+      </Card>
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Upcoming Assignments */}

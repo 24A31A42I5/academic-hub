@@ -218,7 +218,7 @@ const FacultyReviews = () => {
             </div>
             <div>
               <p className="text-2xl font-bold">{mediumRiskCount}</p>
-              <p className="text-sm text-muted-foreground">Medium Risk</p>
+              <p className="text-sm text-muted-foreground">Manual Review</p>
             </div>
           </CardContent>
         </Card>
@@ -256,7 +256,7 @@ const FacultyReviews = () => {
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="font-semibold">{submission.student_profile?.full_name}</h3>
                       <Badge variant={submission.ai_risk_level === 'high' ? 'destructive' : 'default'}>
-                        {submission.ai_risk_level === 'high' ? 'High Risk' : 'Medium Risk'}
+                        {submission.ai_risk_level === 'high' ? 'Reupload Required' : 'Manual Review'}
                       </Badge>
                       {submission.status === 'reviewed' && (
                         <Badge variant="outline" className="bg-green-500/10 text-green-600">
@@ -374,7 +374,7 @@ const FacultyReviews = () => {
                       <p className="text-sm text-muted-foreground">{viewSubmission.assignment?.title}</p>
                     </div>
                     <Badge variant={viewSubmission.ai_risk_level === 'high' ? 'destructive' : 'default'}>
-                      {viewSubmission.ai_risk_level === 'high' ? 'High Risk' : 'Medium Risk'}
+                      {viewSubmission.ai_risk_level === 'high' ? 'Reupload Required' : 'Manual Review'}
                     </Badge>
                   </div>
                   <div className="mt-3 flex gap-4 text-sm">
