@@ -146,13 +146,13 @@ const StudentSubmissions = () => {
           if (updated.verified_at && updated.ai_risk_level) {
             switch (updated.ai_risk_level) {
               case 'low':
-                toast.success('Verification complete: Handwriting verified!');
+                toast.success('Verification complete: Verified');
                 break;
               case 'medium':
-                toast.info('Verification complete: Under review');
+                toast.info('Verification complete: Manual review required');
                 break;
               case 'high':
-                toast.warning('Verification complete: Flagged for review');
+                toast.error('Verification result: Reupload required');
                 break;
               case 'unverified':
                 toast.info('Verification skipped: No handwriting sample on file.');
@@ -236,11 +236,11 @@ const StudentSubmissions = () => {
             <TooltipTrigger>
               <Badge className="bg-yellow-500/10 text-yellow-600 gap-1">
                 <AlertTriangle className="w-3 h-3" />
-                Under Review
+                Manual Review
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Your submission is being reviewed</p>
+              <p>Score 50–79: faculty manual review required</p>
             </TooltipContent>
           </Tooltip>
         );
@@ -250,11 +250,11 @@ const StudentSubmissions = () => {
             <TooltipTrigger>
               <Badge variant="destructive" className="gap-1">
                 <AlertTriangle className="w-3 h-3" />
-                Flagged
+                Reupload Required
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Your submission has been flagged for review</p>
+              <p>Score &lt; 50: please reupload a clearer handwritten submission</p>
             </TooltipContent>
           </Tooltip>
         );

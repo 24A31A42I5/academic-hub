@@ -353,10 +353,10 @@ const FacultySubmissions = () => {
             <TooltipTrigger>
               <Badge variant="destructive" className="gap-1">
                 <XCircle className="w-3 h-3" />
-                High Risk
+                Reupload Required
               </Badge>
             </TooltipTrigger>
-            <TooltipContent>Handwriting mismatch detected - review required</TooltipContent>
+            <TooltipContent>Score &lt; 50: student should reupload</TooltipContent>
           </Tooltip>
         );
       case 'medium':
@@ -365,10 +365,10 @@ const FacultySubmissions = () => {
             <TooltipTrigger>
               <Badge className="bg-warning text-warning-foreground gap-1">
                 <AlertTriangle className="w-3 h-3" />
-                Medium Risk
+                Manual Review
               </Badge>
             </TooltipTrigger>
-            <TooltipContent>Some concerns detected - review recommended</TooltipContent>
+            <TooltipContent>Score 50–79: manual review required</TooltipContent>
           </Tooltip>
         );
       case 'low':
@@ -380,7 +380,7 @@ const FacultySubmissions = () => {
                 Verified
               </Badge>
             </TooltipTrigger>
-            <TooltipContent>Handwriting matches reference sample</TooltipContent>
+            <TooltipContent>Score ≥ 80: handwriting verified</TooltipContent>
           </Tooltip>
         );
       case 'unverified':

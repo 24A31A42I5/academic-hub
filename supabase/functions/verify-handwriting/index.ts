@@ -411,16 +411,14 @@ Respond with ONLY this JSON (no markdown, no extra text):
 }
 
 ## SCORING RUBRIC
-- **90-100**: Same writer (9+ matching features, no significant differences)
-- **70-89**: Probable same writer (6-8 matching features)
-- **50-69**: Inconclusive (requires human review)
-- **30-49**: Probable different writer
-- **0-29**: Different writer OR typed content
+- **80-100**: Verified (same writer)
+- **50-79**: Manual review required
+- **0-49**: Reupload required (likely different writer / typed / unclear)
 
-## RISK LEVEL
-- "low": similarity >= 90 AND confidence >= 80
-- "medium": similarity >= 70 AND confidence >= 50
-- "high": similarity < 70 OR confidence < 50 OR critical flags detected
+## RISK LEVEL (for output)
+- "low": similarity >= 80
+- "medium": 50 <= similarity < 80
+- "high": similarity < 50 OR critical flags detected
 
 BE STRICT. Academic integrity depends on accurate analysis.`;
 
@@ -533,19 +531,20 @@ BE STRICT. Academic integrity depends on accurate analysis.`;
     const criticalFlagsDetected = hasCriticalFlags(aiResult.flagged_concerns || []);
     console.log('Critical flags detected:', criticalFlagsDetected);
 
-    // Determine final risk level with STRICTER thresholds
+    // Determine final risk level with simple thresholds
+    // - low: similarity >= 80 (Verified)
+    // - medium: 50 <= similarity < 80 (Manual Review)
+    // - high: similarity < 50 (Reupload Required)
     let riskLevel: 'low' | 'medium' | 'high';
+
     if (criticalFlagsDetected) {
-      // Any critical flag = high risk
+      // Any critical flag => treat as reupload required
       riskLevel = 'high';
-    } else if (finalSimilarity >= 90 && aiResult.confidence_score >= 80) {
-      // Stricter threshold for low risk
+    } else if (finalSimilarity >= 80) {
       riskLevel = 'low';
-    } else if (finalSimilarity >= 70 && aiResult.confidence_score >= 50) {
-      // Medium range
+    } else if (finalSimilarity >= 50) {
       riskLevel = 'medium';
     } else {
-      // Everything else is high risk
       riskLevel = 'high';
     }
 
