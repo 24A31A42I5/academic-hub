@@ -20,6 +20,10 @@ const studentSchema = z.object({
   fullName: fullNameSchema,
   email: emailSchema,
   password: passwordSchema,
+  phoneNumber: z
+    .string()
+    .min(10, 'Phone number is required')
+    .max(15, 'Phone number is too long'),
   rollNumber: z.string().min(1, 'Roll number is required'),
   year: z.string().min(1, 'Year is required'),
   branch: z.string().min(1, 'Branch is required'),
@@ -57,6 +61,7 @@ const Auth = () => {
     email: '',
     password: '',
     fullName: '',
+    phoneNumber: '',
     rollNumber: '',
     year: '',
     branch: '',
@@ -146,7 +151,13 @@ const Auth = () => {
         }
 
         const additionalData = role === 'student' 
-          ? { rollNumber: formData.rollNumber, year: parseInt(formData.year), branch: formData.branch, section: formData.section }
+          ? { 
+              phoneNumber: formData.phoneNumber,
+              rollNumber: formData.rollNumber, 
+              year: parseInt(formData.year), 
+              branch: formData.branch, 
+              section: formData.section 
+            }
           : role === 'faculty' 
             ? { facultyId: formData.facultyId }
             : undefined;
@@ -327,6 +338,22 @@ const Auth = () => {
                 {/* Student Fields */}
                 {mode === 'register' && role === 'student' && (
                   <>
+                    <div className="space-y-2">
+                      <Label htmlFor="phoneNumber">Mobile Number</Label>
+                      <Input
+                        id="phoneNumber"
+                        inputMode="tel"
+                        value={formData.phoneNumber}
+                        onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
+                        placeholder="Enter your mobile number"
+                        className={errors.phoneNumber ? 'border-destructive' : ''}
+                      />
+                      {errors.phoneNumber && <p className="text-sm text-destructive">{errors.phoneNumber}</p>}
+                      <p className="text-xs text-muted-foreground">
+                        Used for SMS notifications (assignments & reminders).
+                      </p>
+                    </div>
+
                     <div className="space-y-2">
                       <Label htmlFor="rollNumber">Roll Number</Label>
                       <Input

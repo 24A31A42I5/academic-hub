@@ -10,6 +10,7 @@ interface Profile {
   user_id: string;
   full_name: string;
   email: string;
+  phone_number?: string | null;
   role: AppRole;
 }
 
@@ -106,12 +107,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!authData.user) return { error: new Error('User creation failed') };
 
       // Create profile
+      const phoneNumber = typeof additionalData?.phoneNumber === 'string' ? (additionalData.phoneNumber as string) : null;
+
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .insert({
           user_id: authData.user.id,
           full_name: fullName,
           email,
+          phone_number: phoneNumber,
           role
         })
         .select()
@@ -144,7 +148,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             roll_number: additionalData.rollNumber as string,
             year: additionalData.year as number,
             branch: additionalData.branch as string,
-            section: additionalData.section as string
+            section: additionalData.section as string,
+            phone_number: (additionalData.phoneNumber as string) || null,
           });
 
         if (studentError) {
