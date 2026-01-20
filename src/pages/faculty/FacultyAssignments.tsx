@@ -142,11 +142,11 @@ const FacultyAssignments = () => {
 
       if (error) throw error;
 
-      // Get student emails for the section to notify them
+      // Get student emails and phone numbers for the section to notify them
       try {
         const { data: students } = await supabase
           .from('profiles')
-          .select(`email, student_details!inner(year, branch, section)`)
+          .select(`email, phone_number, student_details!inner(year, branch, section, phone_number)`)
           .eq('role', 'student')
           .eq('student_details.year', selectedSection.year)
           .eq('student_details.branch', selectedSection.branch)
@@ -154,11 +154,20 @@ const FacultyAssignments = () => {
 
         if (students && students.length > 0) {
           const studentEmails = students.map(s => s.email);
+          const studentPhones = students.map(s => {
+            const details = s.student_details;
+            if (Array.isArray(details) && details[0]) {
+              return (details[0] as { phone_number?: string }).phone_number || s.phone_number;
+            }
+            return s.phone_number;
+          }).filter(Boolean) as string[];
+          
           await supabase.functions.invoke('send-notification', {
             body: {
               type: 'new_assignment',
               data: {
                 studentEmails,
+                studentPhones,
                 assignmentTitle: form.title,
                 deadline: new Date(form.deadline).toISOString(),
                 year: selectedSection.year,

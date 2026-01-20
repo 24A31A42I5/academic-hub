@@ -13,9 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, FileText, AlertTriangle, Clock, CheckCircle, ExternalLink, Search, Users, Mail, Shield, XCircle } from 'lucide-react';
+import { Loader2, FileText, AlertTriangle, Clock, CheckCircle, ExternalLink, Search, Users, Mail, Shield, XCircle, Eye } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { format } from 'date-fns';
+import FilePreviewDialog from '@/components/faculty/FilePreviewDialog';
 
 const navItems = [
   { label: 'Overview', href: '/faculty', icon: DashboardIcons.Home },
@@ -92,6 +93,7 @@ const FacultySubmissions = () => {
   const [gradeSubmission, setGradeSubmission] = useState<Submission | null>(null);
   const [gradeForm, setGradeForm] = useState({ marks: '', feedback: '', status: 'graded' });
   const [saving, setSaving] = useState(false);
+  const [previewSubmission, setPreviewSubmission] = useState<Submission | null>(null);
 
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'faculty')) {
@@ -679,15 +681,27 @@ const FacultySubmissions = () => {
 
       {/* Grade Dialog */}
       <Dialog open={!!gradeSubmission} onOpenChange={() => setGradeSubmission(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Grade Submission</DialogTitle>
           </DialogHeader>
           {gradeSubmission && (
             <div className="space-y-4">
-              <div className="p-4 bg-muted rounded-lg">
-                <p className="font-medium">{gradeSubmission.student_profile?.full_name}</p>
-                <p className="text-sm text-muted-foreground">{gradeSubmission.assignment?.title}</p>
+              <div className="p-4 bg-muted rounded-lg flex items-center justify-between">
+                <div>
+                  <p className="font-medium">{gradeSubmission.student_profile?.full_name}</p>
+                  <p className="text-sm text-muted-foreground">{gradeSubmission.assignment?.title}</p>
+                </div>
+                {gradeSubmission.file_url && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setPreviewSubmission(gradeSubmission)}
+                  >
+                    <Eye className="w-4 h-4 mr-2" />
+                    View Submission
+                  </Button>
+                )}
               </div>
               <div>
                 <Label>Marks</Label>
@@ -737,6 +751,16 @@ const FacultySubmissions = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* File Preview Dialog */}
+      <FilePreviewDialog
+        open={!!previewSubmission}
+        onOpenChange={() => setPreviewSubmission(null)}
+        fileUrl={previewSubmission?.file_url || null}
+        fileType={previewSubmission?.file_type || null}
+        studentName={previewSubmission?.student_profile?.full_name}
+        assignmentTitle={previewSubmission?.assignment?.title}
+      />
     </DashboardLayout>
   );
 };

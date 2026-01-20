@@ -7,12 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Loader2, AlertTriangle, ExternalLink, CheckCircle, XCircle, Eye } from 'lucide-react';
+import { Loader2, AlertTriangle, ExternalLink, CheckCircle, XCircle, Eye, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
+import FilePreviewDialog from '@/components/faculty/FilePreviewDialog';
 
 const navItems = [
   { label: 'Overview', href: '/faculty', icon: DashboardIcons.Home },
@@ -72,6 +73,7 @@ const FacultyReviews = () => {
   const [viewSubmission, setViewSubmission] = useState<FlaggedSubmission | null>(null);
   const [reviewForm, setReviewForm] = useState({ marks: '', feedback: '', status: '' });
   const [saving, setSaving] = useState(false);
+  const [previewSubmission, setPreviewSubmission] = useState<FlaggedSubmission | null>(null);
 
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'faculty')) {
@@ -358,7 +360,7 @@ const FacultyReviews = () => {
 
       {/* Review Dialog */}
       <Dialog open={!!viewSubmission} onOpenChange={() => setViewSubmission(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Review Flagged Submission</DialogTitle>
           </DialogHeader>
@@ -379,6 +381,17 @@ const FacultyReviews = () => {
                     <span>Similarity: {viewSubmission.ai_similarity_score}%</span>
                     <span>Confidence: {viewSubmission.ai_confidence_score}%</span>
                   </div>
+                  {viewSubmission.file_url && (
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => setPreviewSubmission(viewSubmission)}
+                    >
+                      <FileText className="w-4 h-4 mr-2" />
+                      View Submitted File
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
 
@@ -431,6 +444,16 @@ const FacultyReviews = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* File Preview Dialog */}
+      <FilePreviewDialog
+        open={!!previewSubmission}
+        onOpenChange={() => setPreviewSubmission(null)}
+        fileUrl={previewSubmission?.file_url || null}
+        fileType={previewSubmission?.file_type || null}
+        studentName={previewSubmission?.student_profile?.full_name}
+        assignmentTitle={previewSubmission?.assignment?.title}
+      />
     </DashboardLayout>
   );
 };
