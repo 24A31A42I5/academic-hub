@@ -804,17 +804,46 @@ serve(async (req) => {
     const referenceFeatures = studentDetails.handwriting_feature_embedding as SimpleFeatures | null;
     console.log('Reference features available:', !!referenceFeatures);
 
-    // Fetch both files
+    // Check submission file type - PDFs/DOCs can't be visually analyzed by AI
+    const submissionMimeType = getMimeType(file_url, file_type);
+    console.log('Submission MIME:', submissionMimeType);
+
+    // For PDFs and DOCs, mark for manual review since AI can't process them
+    if (submissionMimeType === 'application/pdf' || 
+        submissionMimeType.includes('msword') || 
+        submissionMimeType.includes('wordprocessing')) {
+      console.log('Document file detected - marking for manual review');
+      
+      await supabase
+        .from('submissions')
+        .update({
+          ai_risk_level: 'medium',
+          ai_analysis_details: { 
+            note: 'Document file requires manual verification. AI can only analyze images.',
+            file_type: submissionMimeType,
+            needs_manual_review: true 
+          },
+          verified_at: new Date().toISOString(),
+        })
+        .eq('id', submission_id);
+      
+      return new Response(JSON.stringify({ 
+        success: true, 
+        message: 'Document marked for manual review (PDF/DOC files require faculty verification)',
+        risk_level: 'medium'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Fetch both image files for AI verification
     const [referenceBase64, submissionBase64] = await Promise.all([
       fetchFileAsBase64(studentDetails.handwriting_url, supabase),
       fetchFileAsBase64(file_url, supabase),
     ]);
 
     const referenceMimeType = getMimeType(studentDetails.handwriting_url);
-    const submissionMimeType = getMimeType(file_url, file_type);
-
     console.log('Reference MIME:', referenceMimeType);
-    console.log('Submission MIME:', submissionMimeType);
 
     // Build AI prompt for visual analysis
     const analysisPrompt = `You are an expert forensic document examiner specializing in handwriting analysis.
@@ -870,34 +899,18 @@ Respond with ONLY this JSON:
 
 BE STRICT. Academic integrity depends on accurate analysis.`;
 
+    // Build content with both images
     const content: any[] = [
       { type: 'text', text: analysisPrompt },
       {
         type: 'image_url',
         image_url: { url: `data:${referenceMimeType};base64,${referenceBase64}` }
+      },
+      {
+        type: 'image_url',
+        image_url: { url: `data:${submissionMimeType};base64,${submissionBase64}` }
       }
     ];
-
-    if (submissionMimeType === 'application/pdf') {
-      content.push({
-        type: 'image_url',
-        image_url: { url: `data:application/pdf;base64,${submissionBase64}` }
-      });
-    } else if (submissionMimeType.startsWith('image/')) {
-      content.push({
-        type: 'image_url',
-        image_url: { url: `data:${submissionMimeType};base64,${submissionBase64}` }
-      });
-    } else {
-      content.push({
-        type: 'text',
-        text: 'Note: The submission is a document. Analyze visible handwriting or note if typed.'
-      });
-      content.push({
-        type: 'image_url',
-        image_url: { url: `data:${submissionMimeType};base64,${submissionBase64}` }
-      });
-    }
 
     console.log('Calling Lovable AI...');
 
