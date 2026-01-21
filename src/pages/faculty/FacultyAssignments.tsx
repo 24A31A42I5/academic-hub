@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, BookOpen, Plus, FileText, AlertTriangle, Calendar, Pencil, Trash2 } from 'lucide-react';
+import { Loader2, BookOpen, Plus, FileText, AlertTriangle, Calendar, Pencil, Trash2, Bell, Send } from 'lucide-react';
 import { format } from 'date-fns';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 
@@ -54,6 +54,7 @@ const FacultyAssignments = () => {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [sendingReminder, setSendingReminder] = useState<string | null>(null);
   
   const [form, setForm] = useState({
     title: '',
@@ -206,6 +207,86 @@ const FacultyAssignments = () => {
     }
   };
 
+  // Send manual reminder to students who haven't submitted
+  const handleSendReminder = async (assignment: Assignment) => {
+    setSendingReminder(assignment.id);
+    try {
+      // Get students who have NOT submitted
+      const submittedProfileIds = new Set(assignment.submissions?.map(s => s.id) || []);
+      
+      // Get all students in this section
+      const { data: allStudents } = await supabase
+        .from('profiles')
+        .select(`
+          id, email, phone_number,
+          student_details!inner(profile_id, year, branch, section, phone_number)
+        `)
+        .eq('role', 'student')
+        .eq('student_details.year', assignment.year)
+        .eq('student_details.branch', assignment.branch)
+        .eq('student_details.section', assignment.section);
+
+      if (!allStudents || allStudents.length === 0) {
+        toast.info('No students found in this section');
+        return;
+      }
+
+      // Get submissions for this assignment to filter
+      const { data: submissions } = await supabase
+        .from('submissions')
+        .select('student_profile_id')
+        .eq('assignment_id', assignment.id);
+
+      const submittedIds = new Set((submissions || []).map(s => s.student_profile_id));
+      const studentsToRemind = allStudents.filter(s => !submittedIds.has(s.id));
+
+      if (studentsToRemind.length === 0) {
+        toast.success('All students have already submitted!');
+        return;
+      }
+
+      const studentEmails = studentsToRemind.map(s => s.email);
+      const studentPhones = studentsToRemind.map(s => {
+        const details = s.student_details;
+        if (Array.isArray(details) && details[0]) {
+          return (details[0] as { phone_number?: string }).phone_number || s.phone_number;
+        }
+        return s.phone_number;
+      }).filter(Boolean) as string[];
+
+      // Calculate hours remaining
+      const deadline = new Date(assignment.deadline);
+      const now = new Date();
+      const hoursRemaining = Math.max(0, Math.round((deadline.getTime() - now.getTime()) / (60 * 60 * 1000)));
+
+      const { error } = await supabase.functions.invoke('send-notification', {
+        body: {
+          type: 'deadline_reminder',
+          data: {
+            studentEmails,
+            studentPhones,
+            assignmentTitle: assignment.title,
+            deadline: assignment.deadline,
+            year: assignment.year,
+            branch: assignment.branch,
+            section: assignment.section,
+            hoursRemaining,
+            assignmentId: assignment.id,
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      toast.success(`Reminder sent to ${studentsToRemind.length} student(s)!`);
+    } catch (error) {
+      console.error('Error sending reminder:', error);
+      toast.error('Failed to send reminder');
+    } finally {
+      setSendingReminder(null);
+    }
+  };
+
   if (authLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -299,6 +380,23 @@ const FacultyAssignments = () => {
                         <p className="text-xs text-muted-foreground">submissions</p>
                       </div>
                       <div className="flex gap-2">
+                        {/* Send Reminder Button - only show if not all submitted */}
+                        {submissionCount < studentCount && isActive && (
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleSendReminder(assignment)}
+                            disabled={sendingReminder === assignment.id}
+                            className="text-orange-600 border-orange-300 hover:bg-orange-50"
+                          >
+                            {sendingReminder === assignment.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                            ) : (
+                              <Bell className="w-4 h-4 mr-1" />
+                            )}
+                            Remind
+                          </Button>
+                        )}
                         <Link to={`/faculty/submissions?assignment=${assignment.id}`}>
                           <Button variant="outline" size="sm">
                             <FileText className="w-4 h-4 mr-1" />
