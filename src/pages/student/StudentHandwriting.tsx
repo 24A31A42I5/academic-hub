@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Loader2, Upload, AlertTriangle, CheckCircle, Image, FileWarning, Lock, Copy, Sparkles } from 'lucide-react';
+import { Loader2, Upload, AlertTriangle, CheckCircle, Image, FileWarning, Lock, Copy, Sparkles, RefreshCw, Zap } from 'lucide-react';
 import { format } from 'date-fns';
 
 const navItems = [
@@ -33,6 +33,7 @@ const StudentHandwriting = () => {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [extractingFeatures, setExtractingFeatures] = useState(false);
+  const [retraining, setRetraining] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -253,6 +254,44 @@ const StudentHandwriting = () => {
     }
   };
 
+  // Retrain/re-extract features from existing handwriting sample
+  const handleRetrainFeatures = async () => {
+    if (!studentDetails?.handwriting_url || !studentDetails?.id) {
+      toast.error('No handwriting sample found');
+      return;
+    }
+
+    setRetraining(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('extract-handwriting-features', {
+        body: {
+          image_url: studentDetails.handwriting_url,
+          student_details_id: studentDetails.id,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        toast.success('Features re-extracted successfully!');
+        // Refresh student details
+        const { data: updatedDetails } = await supabase
+          .from('student_details')
+          .select('*')
+          .eq('id', studentDetails.id)
+          .single();
+        setStudentDetails(updatedDetails);
+      } else {
+        toast.error(data?.error || 'Feature extraction failed');
+      }
+    } catch (error: any) {
+      console.error('Retrain error:', error);
+      toast.error('Failed to re-extract features');
+    } finally {
+      setRetraining(false);
+    }
+  };
+
   if (authLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -330,6 +369,42 @@ const StudentHandwriting = () => {
                   <div className="flex items-center gap-1 text-warning">
                     <Lock className="w-4 h-4" />
                     <span>Locked</span>
+                  </div>
+                </div>
+
+                {/* Retrain Features Button */}
+                <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-start gap-2">
+                      <Zap className="w-5 h-5 text-primary mt-0.5" />
+                      <div className="text-sm">
+                        <p className="font-medium text-primary">Train AI Model</p>
+                        <p className="text-muted-foreground">
+                          {hasFeatures 
+                            ? 'Re-extract features if verification results seem incorrect'
+                            : 'Extract features from your handwriting for better verification'}
+                        </p>
+                      </div>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={handleRetrainFeatures}
+                      disabled={retraining}
+                      className="shrink-0"
+                    >
+                      {retraining ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                          Training...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          {hasFeatures ? 'Retrain' : 'Train Model'}
+                        </>
+                      )}
+                    </Button>
                   </div>
                 </div>
 

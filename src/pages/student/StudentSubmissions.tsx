@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle } from 'lucide-react';
+import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -34,6 +34,7 @@ interface Submission {
   submitted_at: string;
   verified_at: string | null;
   ai_risk_level: string | null;
+  ai_similarity_score: number | null;
   assignment: {
     id: string;
     title: string;
@@ -57,6 +58,8 @@ const StudentSubmissions = () => {
     }
   }, [profile, authLoading, navigate]);
 
+  const [verifyingIds, setVerifyingIds] = useState<Set<string>>(new Set());
+
   const fetchSubmissions = useCallback(async () => {
     if (!profile) return;
     
@@ -73,6 +76,7 @@ const StudentSubmissions = () => {
         submitted_at,
         verified_at,
         ai_risk_level,
+        ai_similarity_score,
         assignment:assignments (
           id,
           title,
@@ -89,6 +93,53 @@ const StudentSubmissions = () => {
       setSubmissions(data as unknown as Submission[]);
     }
   }, [profile]);
+
+  // Manual verify function for stuck submissions
+  const handleManualVerify = async (submission: Submission) => {
+    setVerifyingIds(prev => new Set(prev).add(submission.id));
+    toast.info('Starting verification...', { duration: 2000 });
+
+    try {
+      const { data, error } = await supabase.functions.invoke('verify-handwriting', {
+        body: {
+          submission_id: submission.id,
+          file_url: submission.file_url,
+          file_type: submission.file_type,
+          student_profile_id: profile?.id,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        toast.success(`Verification complete! Score: ${data.similarity_score}%`);
+        await fetchSubmissions();
+      } else {
+        toast.warning(data?.message || 'Verification completed with issues');
+        await fetchSubmissions();
+      }
+    } catch (error: any) {
+      console.error('Verification error:', error);
+      toast.error('Verification failed. Please try again later.');
+    } finally {
+      setVerifyingIds(prev => {
+        const next = new Set(prev);
+        next.delete(submission.id);
+        return next;
+      });
+    }
+  };
+
+  // Check if submission needs manual verify button
+  const needsManualVerify = (submission: Submission): boolean => {
+    // Show button if no verification result and submitted more than 2 minutes ago
+    if (submission.verified_at) return false;
+    if (!submission.ai_risk_level || submission.ai_risk_level === 'pending') {
+      const submittedTime = new Date(submission.submitted_at).getTime();
+      return Date.now() - submittedTime > 2 * 60 * 1000; // 2 minutes
+    }
+    return false;
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -381,7 +432,25 @@ const StudentSubmissions = () => {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      {getVerificationBadge(submission)}
+                      <div className="flex items-center gap-2">
+                        {getVerificationBadge(submission)}
+                        {needsManualVerify(submission) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleManualVerify(submission)}
+                            disabled={verifyingIds.has(submission.id)}
+                            className="h-7 text-xs"
+                          >
+                            {verifyingIds.has(submission.id) ? (
+                              <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                            ) : (
+                              <Zap className="w-3 h-3 mr-1" />
+                            )}
+                            Verify
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {submission.marks !== null ? (
@@ -396,11 +465,31 @@ const StudentSubmissions = () => {
                       </p>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" asChild>
-                        <a href={submission.file_url} target="_blank" rel="noopener noreferrer">
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        {submission.ai_risk_level === 'high' && submission.status !== 'graded' && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => navigate(`/student/assignments/${submission.assignment?.id}`)}
+                                className="h-7 text-xs text-destructive border-destructive/50"
+                              >
+                                <Upload className="w-3 h-3 mr-1" />
+                                Reupload
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Your submission requires a clearer handwritten file</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={submission.file_url} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
