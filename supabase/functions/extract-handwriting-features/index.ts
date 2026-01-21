@@ -12,16 +12,16 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 interface HandwritingFeatures {
-  slant_angle: number; // degrees, negative = left, positive = right
-  stroke_width: number; // 1-10 scale
-  letter_height_ratio: number; // x-height to total height ratio 0-1
-  inter_letter_spacing: number; // 1-10 scale (tight to wide)
-  inter_word_spacing: number; // 1-10 scale (tight to wide)
-  baseline_stability: number; // 1-10 scale (wavy to stable)
-  letter_roundness: number; // 1-10 scale (angular to round)
-  connection_style: number; // 0-100 (% cursive vs print)
-  pressure_variation: number; // 1-10 scale (consistent to varied)
-  character_consistency: number; // 1-10 scale (varied to consistent)
+  slant_angle: number;
+  stroke_width: number;
+  letter_height_ratio: number;
+  inter_letter_spacing: number;
+  inter_word_spacing: number;
+  baseline_stability: number;
+  letter_roundness: number;
+  connection_style: number;
+  pressure_variation: number;
+  character_consistency: number;
 }
 
 async function fetchFileAsBase64(url: string): Promise<string> {
@@ -42,7 +42,8 @@ serve(async (req) => {
   try {
     const { image_url, student_details_id } = await req.json();
 
-    console.log('Extracting handwriting features for student:', student_details_id);
+    console.log('=== FEATURE EXTRACTION START ===');
+    console.log('Student details ID:', student_details_id);
     console.log('Image URL:', image_url);
 
     if (!LOVABLE_API_KEY) {
@@ -61,13 +62,9 @@ serve(async (req) => {
     const extractionPrompt = `You are an expert forensic document examiner specializing in handwriting analysis. 
 Your task is to analyze this handwriting sample and extract precise numerical features that characterize this writer's unique style.
 
-The sample should contain:
-- All capital letters A-Z
-- All lowercase letters a-z
-- Numbers 0-9
-- Sample sentences
+The sample should contain handwritten text (letters, numbers, sentences).
 
-ANALYZE THE HANDWRITING AND EXTRACT THESE FEATURES:
+ANALYZE THE HANDWRITING AND EXTRACT THESE 10 FEATURES:
 
 1. **slant_angle** (-45 to +45 degrees)
    - Negative = leftward slant
@@ -78,10 +75,9 @@ ANALYZE THE HANDWRITING AND EXTRACT THESE FEATURES:
 2. **stroke_width** (1-10)
    - 1 = very thin/light strokes
    - 10 = very thick/heavy strokes
-   - Consider the average thickness of pen strokes
 
 3. **letter_height_ratio** (0.3-0.9)
-   - Ratio of x-height (lowercase letters like 'a', 'e', 'o') to total letter height (ascenders like 'b', 'd', 'l')
+   - Ratio of x-height to total letter height
    - 0.5 = x-height is half the total height
 
 4. **inter_letter_spacing** (1-10)
@@ -103,7 +99,6 @@ ANALYZE THE HANDWRITING AND EXTRACT THESE FEATURES:
 8. **connection_style** (0-100)
    - 0 = completely print style (no connections)
    - 100 = completely cursive (all letters connected)
-   - Value represents percentage of connected letters
 
 9. **pressure_variation** (1-10)
    - 1 = very consistent pressure throughout
@@ -169,7 +164,7 @@ Be precise and consistent. These features will be used to verify the writer's id
 
     const aiData = await aiResponse.json();
     const responseText = aiData.choices?.[0]?.message?.content || '';
-    console.log('AI Response:', responseText);
+    console.log('AI Response received');
 
     // Parse the features
     let features: HandwritingFeatures;
@@ -192,9 +187,23 @@ Be precise and consistent. These features will be used to verify the writer's id
           throw new Error(`Missing or invalid field: ${field}`);
         }
       }
+
+      // Clamp values to valid ranges
+      features.slant_angle = Math.max(-45, Math.min(45, features.slant_angle));
+      features.stroke_width = Math.max(1, Math.min(10, features.stroke_width));
+      features.letter_height_ratio = Math.max(0.3, Math.min(0.9, features.letter_height_ratio));
+      features.inter_letter_spacing = Math.max(1, Math.min(10, features.inter_letter_spacing));
+      features.inter_word_spacing = Math.max(1, Math.min(10, features.inter_word_spacing));
+      features.baseline_stability = Math.max(1, Math.min(10, features.baseline_stability));
+      features.letter_roundness = Math.max(1, Math.min(10, features.letter_roundness));
+      features.connection_style = Math.max(0, Math.min(100, features.connection_style));
+      features.pressure_variation = Math.max(1, Math.min(10, features.pressure_variation));
+      features.character_consistency = Math.max(1, Math.min(10, features.character_consistency));
+
     } catch (parseError) {
       console.error('Failed to parse AI response:', parseError);
-      throw new Error('Failed to extract handwriting features');
+      console.log('Raw response:', responseText);
+      throw new Error('Failed to extract handwriting features from image');
     }
 
     console.log('Extracted features:', features);
@@ -215,7 +224,7 @@ Be precise and consistent. These features will be used to verify the writer's id
       throw new Error('Failed to save handwriting features');
     }
 
-    console.log('Features saved successfully');
+    console.log('=== FEATURE EXTRACTION COMPLETE ===');
 
     return new Response(JSON.stringify({
       success: true,
