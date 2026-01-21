@@ -38,12 +38,14 @@ interface StudentDetails {
   semester: string;
   has_logged_in: boolean;
   handwriting_url: string | null;
+  phone_number: string | null;
 }
 
 interface Student {
   id: string;
   full_name: string;
   email: string;
+  phone_number: string | null;
   created_at: string;
   user_id: string;
   student_details: StudentDetails | StudentDetails[] | null;
@@ -54,6 +56,7 @@ interface ParsedStudent {
   email: string;
   password: string;
   roll_number: string;
+  phone_number: string;
 }
 
 const StudentsPage = () => {
@@ -88,7 +91,7 @@ const StudentsPage = () => {
 
   // Edit dialog
   const [editStudent, setEditStudent] = useState<Student | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', year: '', branch: '', section: '', semester: '', roll_number: '' });
+  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone_number: '', year: '', branch: '', section: '', semester: '', roll_number: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -102,6 +105,7 @@ const StudentsPage = () => {
           user_id,
           full_name,
           email,
+          phone_number,
           created_at,
           student_details (
             roll_number,
@@ -110,7 +114,8 @@ const StudentsPage = () => {
             section,
             semester,
             has_logged_in,
-            handwriting_url
+            handwriting_url,
+            phone_number
           )
         `)
         .eq('role', 'student')
@@ -152,10 +157,11 @@ const StudentsPage = () => {
         email: row['Email'] || row['email'] || row['Mail'] || row['mail'] || '',
         password: row['Password'] || row['password'] || '',
         roll_number: row['Roll Number'] || row['roll_number'] || row['Roll'] || row['roll'] || '',
+        phone_number: row['Phone Number'] || row['phone_number'] || row['Phone'] || row['phone'] || row['Mobile'] || row['mobile'] || '',
       })).filter(s => s.full_name && s.email && s.roll_number && s.password);
 
       if (parsed.length === 0) {
-        toast.error('No valid student data found. Ensure columns: Name, Email, Password, Roll Number');
+        toast.error('No valid student data found. Ensure columns: Name, Email, Password, Roll Number, Phone Number');
         return;
       }
 
@@ -220,8 +226,8 @@ const StudentsPage = () => {
 
   const downloadTemplate = () => {
     const template = [
-      { Name: 'John Doe', Email: 'john@example.com', Password: 'Secure@Pass1', 'Roll Number': 'CS001' },
-      { Name: 'Jane Smith', Email: 'jane@example.com', Password: 'Strong#Pass2', 'Roll Number': 'CS002' },
+      { Name: 'John Doe', Email: 'john@example.com', Password: 'Secure@Pass1', 'Roll Number': 'CS001', 'Phone Number': '9876543210' },
+      { Name: 'Jane Smith', Email: 'jane@example.com', Password: 'Strong#Pass2', 'Roll Number': 'CS002', 'Phone Number': '9876543211' },
     ];
     const ws = XLSX.utils.json_to_sheet(template);
     const wb = XLSX.utils.book_new();
@@ -240,6 +246,8 @@ const StudentsPage = () => {
     setEditStudent(student);
     setEditForm({
       full_name: student.full_name,
+      email: student.email,
+      phone_number: student.phone_number || details?.phone_number || '',
       year: details?.year?.toString() || '',
       branch: details?.branch || '',
       section: details?.section || '',
@@ -252,15 +260,19 @@ const StudentsPage = () => {
     if (!editStudent) return;
     setSaving(true);
     try {
-      // Update profile
+      // Update profile (name, email, phone)
       const { error: profileError } = await supabase
         .from('profiles')
-        .update({ full_name: editForm.full_name })
+        .update({ 
+          full_name: editForm.full_name,
+          email: editForm.email,
+          phone_number: editForm.phone_number || null
+        })
         .eq('id', editStudent.id);
 
       if (profileError) throw profileError;
 
-      // Update student details
+      // Update student details (also update phone_number there for SMS)
       const { error: detailsError } = await supabase
         .from('student_details')
         .update({
@@ -269,6 +281,7 @@ const StudentsPage = () => {
           section: editForm.section,
           semester: editForm.semester,
           roll_number: editForm.roll_number,
+          phone_number: editForm.phone_number || null,
         })
         .eq('profile_id', editStudent.id);
 
@@ -444,7 +457,7 @@ const StudentsPage = () => {
             Bulk Student Registration
           </CardTitle>
           <CardDescription>
-            Excel file must have columns: <strong>Name, Email, Password, Roll Number</strong>. Select Year, Semester, Branch, and Section below.
+            Excel file must have columns: <strong>Name, Email, Password, Roll Number, Phone Number</strong>. Select Year, Semester, Branch, and Section below.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -558,6 +571,7 @@ const StudentsPage = () => {
                       <TableHead>Email</TableHead>
                       <TableHead>Password</TableHead>
                       <TableHead>Roll Number</TableHead>
+                      <TableHead>Phone</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -567,11 +581,12 @@ const StudentsPage = () => {
                         <TableCell>{student.email}</TableCell>
                         <TableCell className="font-mono text-xs">{student.password}</TableCell>
                         <TableCell>{student.roll_number}</TableCell>
+                        <TableCell>{student.phone_number || '-'}</TableCell>
                       </TableRow>
                     ))}
                     {parsedStudents.length > 10 && (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
                           ... and {parsedStudents.length - 10} more
                         </TableCell>
                       </TableRow>
@@ -759,6 +774,7 @@ const StudentsPage = () => {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead>Phone</TableHead>
                   <TableHead>Roll Number</TableHead>
                   <TableHead>Year</TableHead>
                   <TableHead>Sem</TableHead>
@@ -772,7 +788,7 @@ const StudentsPage = () => {
               <TableBody>
                 {filteredStudents.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                       No students found
                     </TableCell>
                   </TableRow>
@@ -782,7 +798,8 @@ const StudentsPage = () => {
                     return (
                       <TableRow key={student.id}>
                         <TableCell className="font-medium">{student.full_name}</TableCell>
-                        <TableCell>{student.email}</TableCell>
+                        <TableCell className="text-xs">{student.email}</TableCell>
+                        <TableCell className="text-xs">{student.phone_number || details?.phone_number || '-'}</TableCell>
                         <TableCell>{details?.roll_number || '-'}</TableCell>
                         <TableCell>{details?.year || '-'}</TableCell>
                         <TableCell>{details?.semester || '-'}</TableCell>
@@ -882,13 +899,25 @@ const StudentsPage = () => {
             <DialogTitle>Edit Student</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div>
-              <Label>Full Name</Label>
-              <Input value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Full Name</Label>
+                <Input value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} />
+              </div>
+              <div>
+                <Label>Roll Number</Label>
+                <Input value={editForm.roll_number} onChange={(e) => setEditForm({ ...editForm, roll_number: e.target.value })} />
+              </div>
             </div>
-            <div>
-              <Label>Roll Number</Label>
-              <Input value={editForm.roll_number} onChange={(e) => setEditForm({ ...editForm, roll_number: e.target.value })} />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Email</Label>
+                <Input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
+              </div>
+              <div>
+                <Label>Phone Number</Label>
+                <Input value={editForm.phone_number} onChange={(e) => setEditForm({ ...editForm, phone_number: e.target.value })} placeholder="e.g. 9876543210" />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>

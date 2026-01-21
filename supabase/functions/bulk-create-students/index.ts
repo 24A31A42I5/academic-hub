@@ -56,6 +56,7 @@ interface StudentData {
   branch: string;
   section: string;
   semester: string;
+  phone_number?: string;
 }
 
 interface BulkCreateRequest {
@@ -213,6 +214,7 @@ serve(async (req: Request) => {
             email: student.email,
             full_name: student.full_name,
             role: "student",
+            phone_number: student.phone_number || null,
           })
           .select()
           .single();
@@ -238,6 +240,7 @@ serve(async (req: Request) => {
             branch: student.branch,
             section: student.section,
             semester: student.semester || 'I',
+            phone_number: student.phone_number || null,
             has_logged_in: false,
           });
 
