@@ -11,18 +11,8 @@ const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-interface HandwritingFeatures {
-  slant_angle: number;
-  stroke_width: number;
-  letter_height_ratio: number;
-  inter_letter_spacing: number;
-  inter_word_spacing: number;
-  baseline_stability: number;
-  letter_roundness: number;
-  connection_style: number;
-  pressure_variation: number;
-  character_consistency: number;
-}
+// This function trains Gemini to learn a student's unique handwriting style
+// by analyzing their reference sample and storing a detailed profile
 
 async function fetchFileAsBase64(url: string): Promise<string> {
   console.log('Fetching file:', url);
@@ -42,7 +32,7 @@ serve(async (req) => {
   try {
     const { image_url, student_details_id } = await req.json();
 
-    console.log('=== FEATURE EXTRACTION START ===');
+    console.log('=== GEMINI HANDWRITING TRAINING START ===');
     console.log('Student details ID:', student_details_id);
     console.log('Image URL:', image_url);
 
@@ -58,73 +48,85 @@ serve(async (req) => {
     const imageBase64 = await fetchFileAsBase64(image_url);
     console.log('Image fetched, size:', imageBase64.length);
 
-    // Build the prompt for feature extraction
-    const extractionPrompt = `You are an expert forensic document examiner specializing in handwriting analysis. 
-Your task is to analyze this handwriting sample and extract precise numerical features that characterize this writer's unique style.
+    // Build the prompt for Gemini to deeply learn this student's handwriting
+    const trainingPrompt = `You are a forensic handwriting expert. Analyze this handwriting sample and create a DETAILED PROFILE of this specific person's handwriting style. This profile will be used to verify their identity in future document submissions.
 
-The sample should contain handwritten text (letters, numbers, sentences).
+STUDY THIS HANDWRITING SAMPLE CAREFULLY AND EXTRACT:
 
-ANALYZE THE HANDWRITING AND EXTRACT THESE 10 FEATURES:
+## 1. LETTER FORMATION CHARACTERISTICS
+- How does this person form each letter? (round, angular, loopy, pointed)
+- Specific quirks in letter shapes (e.g., open or closed 'a', rounded or pointed 'm')
+- How they write numbers (if visible)
+- Capital letter style vs lowercase
+- Any unique letter formations that stand out
 
-1. **slant_angle** (-45 to +45 degrees)
-   - Negative = leftward slant
-   - 0 = vertical
-   - Positive = rightward slant
-   - Measure the average angle of vertical strokes from true vertical
+## 2. SPACING AND LAYOUT
+- Letter spacing (tight, normal, wide)
+- Word spacing pattern
+- Line spacing
+- Margins and text positioning
+- How do they use the page?
 
-2. **stroke_width** (1-10)
-   - 1 = very thin/light strokes
-   - 10 = very thick/heavy strokes
+## 3. STROKE CHARACTERISTICS
+- Pen pressure patterns (heavy, light, varied)
+- Stroke direction preferences
+- Beginning and ending strokes of letters
+- Connections between letters (cursive, print, mixed)
+- Stroke thickness consistency
 
-3. **letter_height_ratio** (0.3-0.9)
-   - Ratio of x-height to total letter height
-   - 0.5 = x-height is half the total height
+## 4. SLANT AND BASELINE
+- Overall slant direction and degree (left, vertical, right)
+- Baseline consistency (straight, wavy, ascending, descending)
+- Letter size consistency (uniform or varied)
 
-4. **inter_letter_spacing** (1-10)
-   - 1 = letters very close together
-   - 10 = letters very spread out
+## 5. UNIQUE IDENTIFIERS
+- List 5-10 SPECIFIC, UNIQUE characteristics that make this handwriting identifiable
+- These should be features that would be hard to replicate
+- Include any distinctive quirks, flourishes, or unusual patterns
 
-5. **inter_word_spacing** (1-10)
-   - 1 = words very close together
-   - 10 = words very spread out
-
-6. **baseline_stability** (1-10)
-   - 1 = very wavy, inconsistent baseline
-   - 10 = perfectly straight baseline
-
-7. **letter_roundness** (1-10)
-   - 1 = very angular, sharp letters
-   - 10 = very round, curved letters
-
-8. **connection_style** (0-100)
-   - 0 = completely print style (no connections)
-   - 100 = completely cursive (all letters connected)
-
-9. **pressure_variation** (1-10)
-   - 1 = very consistent pressure throughout
-   - 10 = highly varied pressure (thick and thin strokes)
-
-10. **character_consistency** (1-10)
-    - 1 = same letters look very different each time
-    - 10 = same letters look identical each time
+## 6. OVERALL STYLE DESCRIPTION
+- A paragraph describing the general impression of this handwriting
+- Is it neat, messy, rushed, careful, artistic, mechanical?
 
 RESPOND WITH ONLY THIS JSON (no markdown, no extra text):
 {
-  "slant_angle": <number>,
-  "stroke_width": <number>,
-  "letter_height_ratio": <number>,
-  "inter_letter_spacing": <number>,
-  "inter_word_spacing": <number>,
-  "baseline_stability": <number>,
-  "letter_roundness": <number>,
-  "connection_style": <number>,
-  "pressure_variation": <number>,
-  "character_consistency": <number>
-}
+  "letter_formation": {
+    "overall_style": "<description>",
+    "lowercase_characteristics": "<detailed description>",
+    "uppercase_characteristics": "<detailed description>",
+    "number_style": "<if visible, describe>",
+    "unique_letter_quirks": ["<quirk1>", "<quirk2>", "..."]
+  },
+  "spacing": {
+    "letter_spacing": "<tight/normal/wide>",
+    "word_spacing": "<tight/normal/wide>",
+    "line_spacing": "<tight/normal/wide>",
+    "overall_density": "<cramped/balanced/spacious>"
+  },
+  "stroke_characteristics": {
+    "pressure": "<light/medium/heavy/varied>",
+    "connections": "<print/cursive/mixed>",
+    "stroke_thickness": "<thin/medium/thick/varied>",
+    "stroke_smoothness": "<smooth/angular/mixed>"
+  },
+  "slant_and_baseline": {
+    "slant_direction": "<left/vertical/right>",
+    "slant_degree": "<slight/moderate/strong>",
+    "baseline_consistency": "<stable/slightly wavy/wavy/ascending/descending>",
+    "size_consistency": "<uniform/slightly varied/highly varied>"
+  },
+  "unique_identifiers": [
+    "<specific unique characteristic 1>",
+    "<specific unique characteristic 2>",
+    "<specific unique characteristic 3>",
+    "<specific unique characteristic 4>",
+    "<specific unique characteristic 5>"
+  ],
+  "overall_description": "<2-3 sentence description of this person's handwriting style>",
+  "confidence_level": "<high/medium/low - based on sample quality>"
+}`;
 
-Be precise and consistent. These features will be used to verify the writer's identity in future submissions.`;
-
-    console.log('Calling Lovable AI for feature extraction...');
+    console.log('Calling Gemini AI to learn handwriting style...');
 
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -138,7 +140,7 @@ Be precise and consistent. These features will be used to verify the writer's id
           {
             role: 'user',
             content: [
-              { type: 'text', text: extractionPrompt },
+              { type: 'text', text: trainingPrompt },
               {
                 type: 'image_url',
                 image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
@@ -164,49 +166,34 @@ Be precise and consistent. These features will be used to verify the writer's id
 
     const aiData = await aiResponse.json();
     const responseText = aiData.choices?.[0]?.message?.content || '';
-    console.log('AI Response received');
+    console.log('Gemini training response received');
 
-    // Parse the features
-    let features: HandwritingFeatures;
+    // Parse the handwriting profile
+    let handwritingProfile: any;
     try {
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('No JSON found in response');
       }
-      features = JSON.parse(jsonMatch[0]);
+      handwritingProfile = JSON.parse(jsonMatch[0]);
       
-      // Validate all required fields exist
-      const requiredFields = [
-        'slant_angle', 'stroke_width', 'letter_height_ratio',
-        'inter_letter_spacing', 'inter_word_spacing', 'baseline_stability',
-        'letter_roundness', 'connection_style', 'pressure_variation', 'character_consistency'
-      ];
-      
-      for (const field of requiredFields) {
-        if (typeof (features as any)[field] !== 'number') {
-          throw new Error(`Missing or invalid field: ${field}`);
-        }
+      // Validate required fields exist
+      if (!handwritingProfile.letter_formation || !handwritingProfile.unique_identifiers) {
+        throw new Error('Missing required profile fields');
       }
 
-      // Clamp values to valid ranges
-      features.slant_angle = Math.max(-45, Math.min(45, features.slant_angle));
-      features.stroke_width = Math.max(1, Math.min(10, features.stroke_width));
-      features.letter_height_ratio = Math.max(0.3, Math.min(0.9, features.letter_height_ratio));
-      features.inter_letter_spacing = Math.max(1, Math.min(10, features.inter_letter_spacing));
-      features.inter_word_spacing = Math.max(1, Math.min(10, features.inter_word_spacing));
-      features.baseline_stability = Math.max(1, Math.min(10, features.baseline_stability));
-      features.letter_roundness = Math.max(1, Math.min(10, features.letter_roundness));
-      features.connection_style = Math.max(0, Math.min(100, features.connection_style));
-      features.pressure_variation = Math.max(1, Math.min(10, features.pressure_variation));
-      features.character_consistency = Math.max(1, Math.min(10, features.character_consistency));
+      // Add metadata
+      handwritingProfile.version = '3.0-gemini-trained';
+      handwritingProfile.trained_at = new Date().toISOString();
+      handwritingProfile.reference_image_url = image_url;
 
     } catch (parseError) {
       console.error('Failed to parse AI response:', parseError);
       console.log('Raw response:', responseText);
-      throw new Error('Failed to extract handwriting features from image');
+      throw new Error('Failed to create handwriting profile from image');
     }
 
-    console.log('Extracted features:', features);
+    console.log('Handwriting profile created:', JSON.stringify(handwritingProfile, null, 2));
 
     // Create Supabase client and update student_details
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -214,21 +201,23 @@ Be precise and consistent. These features will be used to verify the writer's id
     const { error: updateError } = await supabase
       .from('student_details')
       .update({
-        handwriting_feature_embedding: features,
+        handwriting_feature_embedding: handwritingProfile,
         handwriting_features_extracted_at: new Date().toISOString(),
       })
       .eq('id', student_details_id);
 
     if (updateError) {
       console.error('Error updating student details:', updateError);
-      throw new Error('Failed to save handwriting features');
+      throw new Error('Failed to save handwriting profile');
     }
 
-    console.log('=== FEATURE EXTRACTION COMPLETE ===');
+    console.log('=== GEMINI HANDWRITING TRAINING COMPLETE ===');
 
     return new Response(JSON.stringify({
       success: true,
-      features,
+      message: 'Handwriting profile created successfully',
+      profile_version: '3.0-gemini-trained',
+      unique_identifiers_count: handwritingProfile.unique_identifiers?.length || 0,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
