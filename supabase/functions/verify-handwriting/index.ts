@@ -13,8 +13,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // ==================== CONFIGURATION ====================
 const VERIFICATION_THRESHOLDS = {
-  VERIFIED: 75,        // >= 75: Verified (same writer)
-  MANUAL_REVIEW: 50,   // 50-74: Manual Review required
+  VERIFIED: 70,        // >= 70: Verified (same writer)
+  MANUAL_REVIEW: 50,   // 50-69: Manual Review required
   REUPLOAD: 0          // < 50: Reupload Required
 };
 
@@ -116,7 +116,7 @@ serve(async (req) => {
           status: 'needs_manual_review',
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '3.0-gemini',
+            algorithm_version: '3.1-gemini-forensic',
             reason: 'No handwriting reference available for this student',
             recommendation: 'Student needs to submit handwriting sample first'
           },
@@ -154,59 +154,62 @@ serve(async (req) => {
       submissionMime = 'image/png';
     }
 
-    // Build the verification prompt with the trained profile
-    const verificationPrompt = `You are a forensic handwriting verification expert. You have been trained on a specific student's handwriting style and must now verify if a submitted document was written by the same person.
+    // Build the optimized verification prompt - forensic handwriting analysis
+    const verificationPrompt = `You are an AI handwriting verification engine used in an academic integrity system.
 
-## STUDENT'S KNOWN HANDWRITING PROFILE:
+Your task is to compare a student's trained handwriting profile with a newly uploaded handwritten assignment image and determine whether both were written by the same person.
+
+You must analyze only handwriting characteristics, not the meaning, topic, or quality of the text.
+
+## STUDENT'S KNOWN HANDWRITING PROFILE (trained reference):
 ${JSON.stringify(handwritingProfile, null, 2)}
 
-## YOUR TASK:
-Compare the SUBMITTED DOCUMENT (second image) against the REFERENCE SAMPLE (first image) to determine if they were written by the same person.
+## ANALYSIS INSTRUCTIONS:
 
-## ANALYSIS STEPS:
-1. Examine the reference handwriting sample carefully
-2. Look at the submitted document
-3. Compare letter formations, spacing, stroke characteristics, slant, and unique identifiers
-4. Look for the specific unique characteristics mentioned in the profile
-5. Consider natural variations (people's handwriting varies slightly day to day)
-6. Watch for signs of:
-   - Different writer (completely different style)
-   - Typed/printed text (not handwritten)
-   - Traced/copied handwriting (unnatural precision)
-   - Forgery attempt (inconsistent with natural variations)
+Focus strictly on forensic handwriting features including:
+- Letter formation and stroke style
+- Curves, loops, hooks, and sharpness
+- Slant angle and baseline alignment
+- Spacing between letters and words
+- Character height ratios and proportions
+- Stroke thickness and pressure patterns
+- Writing rhythm, consistency, and connections between letters
+- Margin habits and line discipline
 
-## SCORING GUIDELINES:
-- 90-100: Definitely the same person (strong match on unique identifiers)
-- 75-89: Very likely the same person (most characteristics match)
-- 60-74: Possibly the same person (some matching, some differences)
-- 40-59: Unlikely the same person (significant differences)
-- 0-39: Definitely NOT the same person or not handwritten
+## PROCESS:
+1. Extract distinctive handwriting features from the trained profile above
+2. Extract features from the uploaded assignment (second image)
+3. Compare structural similarities and differences against the reference sample (first image)
+4. Compute an overall similarity score
 
-RESPOND WITH ONLY THIS JSON (no markdown, no extra text):
+## IMPORTANT RULES:
+- Be tolerant of natural variation (pen, paper, speed, mood) but strict against different writers
+- In academic verification, false acceptance is worse than false rejection
+- If the document is typed/printed (not handwritten), set similarity_score to 0
+- If it's clearly a different person's handwriting, be confident and give low score
+
+## DECISION RULE:
+- similarity_score >= 70 → same_writer = true
+- similarity_score < 70 → same_writer = false
+
+Return ONLY valid JSON. No markdown. No explanations outside JSON.
+
+Output format exactly:
 {
-  "similarity_score": <0-100>,
-  "confidence_score": <0-100>,
-  "is_same_writer": <true/false>,
-  "is_handwritten": <true/false>,
-  "matching_characteristics": [
-    "<characteristic that matches>"
-  ],
-  "different_characteristics": [
-    "<characteristic that differs>"
-  ],
-  "unique_identifiers_matched": <number out of total>,
+  "similarity_score": number from 0 to 100,
+  "same_writer": true or false,
+  "confidence_level": "low" or "medium" or "high",
+  "is_handwritten": true or false,
+  "key_matching_features": ["feature1", "feature2", "..."],
+  "key_differences": ["difference1", "difference2", "..."],
   "critical_flags": [],
-  "analysis_summary": "<2-3 sentence summary of the comparison>",
-  "recommendation": "<VERIFIED|MANUAL_REVIEW|REUPLOAD_REQUIRED>"
+  "final_reasoning": "short technical justification under 50 words"
 }
 
-IMPORTANT: 
-- If the document is typed/printed, set is_handwritten=false and score=0
-- If it's clearly a different person, be confident and give low score
-- If the unique identifiers match well, it's likely the same person
-- Natural day-to-day variations are normal, don't penalize those`;
+Work internally step-by-step but output only the final JSON.
+Prioritize speed, objectivity, and consistency.`;
 
-    console.log('Calling Gemini AI for direct comparison...');
+    console.log('Calling Gemini AI for forensic comparison...');
 
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -257,7 +260,7 @@ IMPORTANT:
           status: 'needs_manual_review',
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '3.0-gemini',
+            algorithm_version: '3.1-gemini-forensic',
             error: `AI analysis failed: ${aiResponse.status}`,
             reason: 'Could not process document - requires faculty review'
           },
@@ -301,7 +304,7 @@ IMPORTANT:
           status: 'needs_manual_review',
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '3.0-gemini',
+            algorithm_version: '3.1-gemini-forensic',
             error: 'Failed to parse AI response',
             raw_response: responseText.substring(0, 500)
           },
@@ -319,23 +322,26 @@ IMPORTANT:
       });
     }
 
-    // Extract scores and flags
-    const similarityScore = Math.max(0, Math.min(100, verificationResult.similarity_score || 50));
-    const confidenceScore = Math.max(0, Math.min(100, verificationResult.confidence_score || 50));
+    // Extract scores and flags with proper defaults
+    const similarityScore = Math.max(0, Math.min(100, verificationResult.similarity_score ?? 50));
+    const confidenceLevel = verificationResult.confidence_level || 'medium';
+    const confidenceScore = confidenceLevel === 'high' ? 90 : confidenceLevel === 'medium' ? 70 : 50;
     const criticalFlags = verificationResult.critical_flags || [];
-    const hasCriticalFlag = criticalFlags.length > 0 || !verificationResult.is_handwritten;
+    const isHandwritten = verificationResult.is_handwritten !== false;
+    const hasCriticalFlag = criticalFlags.length > 0 || !isHandwritten;
 
-    // Determine final status
+    // Determine final status based on Gemini's analysis
     const riskLevel = determineRiskLevel(similarityScore, hasCriticalFlag);
     const status = determineStatus(similarityScore, hasCriticalFlag);
 
     console.log('Verification result:', {
       similarityScore,
       confidenceScore,
+      confidenceLevel,
       riskLevel,
       status,
-      is_same_writer: verificationResult.is_same_writer,
-      is_handwritten: verificationResult.is_handwritten
+      same_writer: verificationResult.same_writer,
+      is_handwritten: isHandwritten
     });
 
     // Update submission with results
@@ -348,14 +354,13 @@ IMPORTANT:
         status: status,
         verified_at: new Date().toISOString(),
         ai_analysis_details: {
-          algorithm_version: '3.0-gemini',
-          is_same_writer: verificationResult.is_same_writer,
-          is_handwritten: verificationResult.is_handwritten,
-          matching_characteristics: verificationResult.matching_characteristics,
-          different_characteristics: verificationResult.different_characteristics,
-          unique_identifiers_matched: verificationResult.unique_identifiers_matched,
-          analysis_summary: verificationResult.analysis_summary,
-          recommendation: verificationResult.recommendation,
+          algorithm_version: '3.1-gemini-forensic',
+          same_writer: verificationResult.same_writer,
+          is_handwritten: isHandwritten,
+          confidence_level: confidenceLevel,
+          key_matching_features: verificationResult.key_matching_features || [],
+          key_differences: verificationResult.key_differences || [],
+          final_reasoning: verificationResult.final_reasoning || '',
           critical_flags: criticalFlags
         },
         ai_flagged_sections: criticalFlags,
@@ -373,11 +378,12 @@ IMPORTANT:
       success: true,
       score: similarityScore,
       confidence: confidenceScore,
+      confidence_level: confidenceLevel,
       risk_level: riskLevel,
       status: status,
-      is_same_writer: verificationResult.is_same_writer,
-      is_handwritten: verificationResult.is_handwritten,
-      summary: verificationResult.analysis_summary
+      same_writer: verificationResult.same_writer,
+      is_handwritten: isHandwritten,
+      summary: verificationResult.final_reasoning
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -398,7 +404,7 @@ IMPORTANT:
             status: 'needs_manual_review',
             verified_at: new Date().toISOString(),
             ai_analysis_details: {
-              algorithm_version: '3.0-gemini',
+              algorithm_version: '3.1-gemini-forensic',
               error: error instanceof Error ? error.message : 'Unknown error'
             },
           })
