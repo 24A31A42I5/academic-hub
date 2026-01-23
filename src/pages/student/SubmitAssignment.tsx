@@ -400,7 +400,7 @@ const SubmitAssignment = () => {
                   </Button>
                 </div>
               ) : (
-                <>
+              <>
                   <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                   <p className="text-lg font-medium mb-2">Upload Your File</p>
                   <p className="text-sm text-muted-foreground mb-4">
@@ -421,9 +421,14 @@ const SubmitAssignment = () => {
                     <Upload className="w-4 h-4 mr-2" />
                     Choose File
                   </Button>
-                  <p className="text-xs text-muted-foreground mt-4">
-                    Max file size: 10MB. Handwriting will be verified automatically by our AI system.
-                  </p>
+                  <div className="mt-4 space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Max file size: 10MB. Handwriting will be verified automatically by our AI system.
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <strong>Tip:</strong> For best verification results, use JPG or PNG images instead of PDF.
+                    </p>
+                  </div>
                 </>
               )}
             </div>

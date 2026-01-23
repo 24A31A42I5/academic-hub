@@ -1,8 +1,9 @@
+import { forwardRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Shield, GraduationCap, Users, Brain, CheckCircle, ArrowRight } from 'lucide-react';
 
-const Index = () => {
+const Index = forwardRef<HTMLDivElement>((_, ref) => {
   const features = [
     {
       icon: Shield,
@@ -34,7 +35,7 @@ const Index = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div ref={ref} className="min-h-screen bg-background">
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -227,6 +228,8 @@ const Index = () => {
       </footer>
     </div>
   );
-};
+});
+
+Index.displayName = 'Index';
 
 export default Index;
