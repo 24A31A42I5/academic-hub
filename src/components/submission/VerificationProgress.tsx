@@ -31,8 +31,8 @@ interface StageInfo {
 const STAGES: Record<VerificationStage, StageInfo> = {
   uploading: { label: 'Uploading document...', icon: FileSearch, progress: 15 },
   fetching: { label: 'Fetching handwriting profile...', icon: Eye, progress: 35 },
-  analyzing: { label: 'Gemini AI analyzing...', icon: Brain, progress: 65 },
-  comparing: { label: 'Comparing characteristics...', icon: FileCheck, progress: 85 },
+  analyzing: { label: 'Gemini AI analyzing handwriting features...', icon: Brain, progress: 65 },
+  comparing: { label: 'Comparing writing characteristics...', icon: FileCheck, progress: 85 },
   complete: { label: 'Verification complete', icon: CheckCircle, progress: 100 },
 };
 
@@ -44,6 +44,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
     const [riskLevel, setRiskLevel] = useState<string | null>(null);
     const [isComplete, setIsComplete] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [errorType, setErrorType] = useState<string | null>(null);
 
     useEffect(() => {
       // Simulate initial stages with timing
@@ -73,6 +74,13 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
               setStatus(newData.status);
               setScore(newData.ai_similarity_score);
               setRiskLevel(newData.ai_risk_level);
+              
+              // Check for error types in analysis details
+              const analysisDetails = newData.ai_analysis_details;
+              if (analysisDetails?.error_type) {
+                setErrorType(analysisDetails.error_type);
+              }
+              
               onComplete?.(newData.status, newData.ai_similarity_score);
             } else if (newData.status === 'verifying') {
               setStage('analyzing');
@@ -196,7 +204,9 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
               <div className="pt-2 border-t border-border/50">
                 <p className="text-xs text-muted-foreground">
                   {riskLevel === 'low' && 'Handwriting verified successfully. Your submission matches your profile.'}
-                  {riskLevel === 'medium' && 'Some differences detected. Faculty will review your submission.'}
+                  {riskLevel === 'medium' && errorType === 'no_profile' && 'No handwriting profile found. Please upload your handwriting sample.'}
+                  {riskLevel === 'medium' && errorType === 'file_too_large' && 'File too large for automatic analysis. Try using image format instead of PDF.'}
+                  {riskLevel === 'medium' && !errorType && 'Some differences detected. Faculty will review your submission.'}
                   {riskLevel === 'high' && 'Significant differences detected. Please reupload a clear handwritten document.'}
                 </p>
               </div>

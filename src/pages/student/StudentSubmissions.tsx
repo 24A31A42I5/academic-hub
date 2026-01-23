@@ -8,7 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload } from 'lucide-react';
+import { VerificationDetailsDialog } from '@/components/submission/VerificationDetailsDialog';
+import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -35,6 +36,8 @@ interface Submission {
   verified_at: string | null;
   ai_risk_level: string | null;
   ai_similarity_score: number | null;
+  ai_confidence_score: number | null;
+  ai_analysis_details: any;
   assignment: {
     id: string;
     title: string;
@@ -59,6 +62,8 @@ const StudentSubmissions = () => {
   }, [profile, authLoading, navigate]);
 
   const [verifyingIds, setVerifyingIds] = useState<Set<string>>(new Set());
+  const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
+  const [showDetailsDialog, setShowDetailsDialog] = useState(false);
 
   const fetchSubmissions = useCallback(async () => {
     if (!profile) return;
@@ -77,6 +82,8 @@ const StudentSubmissions = () => {
         verified_at,
         ai_risk_level,
         ai_similarity_score,
+        ai_confidence_score,
+        ai_analysis_details,
         assignment:assignments (
           id,
           title,
@@ -93,6 +100,11 @@ const StudentSubmissions = () => {
       setSubmissions(data as unknown as Submission[]);
     }
   }, [profile]);
+
+  const handleViewDetails = (submission: Submission) => {
+    setSelectedSubmission(submission);
+    setShowDetailsDialog(true);
+  };
 
   // Manual verify function for stuck submissions
   const handleManualVerify = async (submission: Submission) => {
@@ -434,6 +446,17 @@ const StudentSubmissions = () => {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         {getVerificationBadge(submission)}
+                        {submission.verified_at && submission.ai_analysis_details && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleViewDetails(submission)}
+                            className="h-7 text-xs"
+                          >
+                            <Eye className="w-3 h-3 mr-1" />
+                            Details
+                          </Button>
+                        )}
                         {needsManualVerify(submission) && (
                           <Button
                             size="sm"
@@ -497,6 +520,20 @@ const StudentSubmissions = () => {
             </Table>
           </CardContent>
         </Card>
+      )}
+      {/* Verification Details Dialog */}
+      {selectedSubmission && (
+        <VerificationDetailsDialog
+          open={showDetailsDialog}
+          onOpenChange={setShowDetailsDialog}
+          submission={{
+            ai_similarity_score: selectedSubmission.ai_similarity_score,
+            ai_confidence_score: selectedSubmission.ai_confidence_score,
+            ai_risk_level: selectedSubmission.ai_risk_level,
+            ai_analysis_details: selectedSubmission.ai_analysis_details,
+            assignment_title: selectedSubmission.assignment?.title,
+          }}
+        />
       )}
     </DashboardLayout>
   );

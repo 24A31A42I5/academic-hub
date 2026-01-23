@@ -18,7 +18,10 @@ const VERIFICATION_THRESHOLDS = {
   REUPLOAD: 0          // < 50: Reupload Required
 };
 
-async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
+// Maximum base64 size to send to AI (5MB encoded = ~3.75MB file)
+const MAX_BASE64_SIZE = 5 * 1024 * 1024;
+
+async function fetchFileAsBase64(url: string, supabase?: any): Promise<{ base64: string; size: number }> {
   console.log('Fetching file:', url);
   
   // Check if this is a Supabase storage URL that needs a signed URL
@@ -45,7 +48,8 @@ async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
     throw new Error(`Failed to fetch file: ${response.status}`);
   }
   const arrayBuffer = await response.arrayBuffer();
-  return encode(arrayBuffer);
+  const base64 = encode(arrayBuffer);
+  return { base64, size: arrayBuffer.byteLength };
 }
 
 function determineRiskLevel(score: number, hasCriticalFlag: boolean): string {
@@ -66,6 +70,70 @@ function determineStatus(score: number, hasCriticalFlag: boolean): string {
     return 'needs_manual_review';
   }
   return 'verified';
+}
+
+// Error types for better frontend messaging
+type ErrorType = 'no_profile' | 'file_too_large' | 'ai_gateway_error' | 'parse_error' | 'rate_limit' | 'unknown';
+
+interface FallbackResult {
+  score: number;
+  risk_level: string;
+  status: string;
+  error_type: ErrorType;
+  message: string;
+}
+
+function getFallbackResult(errorType: ErrorType): FallbackResult {
+  switch (errorType) {
+    case 'no_profile':
+      return {
+        score: 50,
+        risk_level: 'medium',
+        status: 'needs_manual_review',
+        error_type: 'no_profile',
+        message: 'No handwriting profile found. Please upload your handwriting sample first.'
+      };
+    case 'file_too_large':
+      return {
+        score: 50,
+        risk_level: 'medium',
+        status: 'needs_manual_review',
+        error_type: 'file_too_large',
+        message: 'File too large for automatic verification. Manual review required.'
+      };
+    case 'rate_limit':
+      return {
+        score: 50,
+        risk_level: 'medium',
+        status: 'needs_manual_review',
+        error_type: 'rate_limit',
+        message: 'AI service busy. Your submission will be reviewed manually.'
+      };
+    case 'ai_gateway_error':
+      return {
+        score: 50,
+        risk_level: 'medium',
+        status: 'needs_manual_review',
+        error_type: 'ai_gateway_error',
+        message: 'AI analysis temporarily unavailable. Manual review required.'
+      };
+    case 'parse_error':
+      return {
+        score: 50,
+        risk_level: 'medium',
+        status: 'needs_manual_review',
+        error_type: 'parse_error',
+        message: 'Could not process AI response. Manual review required.'
+      };
+    default:
+      return {
+        score: 50,
+        risk_level: 'medium',
+        status: 'needs_manual_review',
+        error_type: 'unknown',
+        message: 'Verification encountered an issue. Manual review required.'
+      };
+  }
 }
 
 serve(async (req) => {
@@ -103,21 +171,23 @@ serve(async (req) => {
     const handwritingProfile = studentDetails?.handwriting_feature_embedding;
     const referenceImageUrl = studentDetails?.handwriting_url;
 
-    // If no handwriting profile exists, mark for manual review
+    // If no handwriting profile exists, mark for manual review with specific error type
     if (!handwritingProfile || !referenceImageUrl) {
       console.log('No handwriting profile found - marking for manual review');
+      const fallback = getFallbackResult('no_profile');
       
       await supabase
         .from('submissions')
         .update({
-          ai_similarity_score: 50,
+          ai_similarity_score: fallback.score,
           ai_confidence_score: 0,
-          ai_risk_level: 'medium',
-          status: 'needs_manual_review',
+          ai_risk_level: fallback.risk_level,
+          status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '3.1-gemini-forensic',
-            reason: 'No handwriting reference available for this student',
+            algorithm_version: '3.2-gemini-forensic',
+            error_type: fallback.error_type,
+            reason: fallback.message,
             recommendation: 'Student needs to submit handwriting sample first'
           },
         })
@@ -125,10 +195,7 @@ serve(async (req) => {
 
       return new Response(JSON.stringify({
         success: true,
-        score: 50,
-        risk_level: 'medium',
-        status: 'needs_manual_review',
-        message: 'No handwriting reference - manual review required'
+        ...fallback
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -136,10 +203,43 @@ serve(async (req) => {
 
     // Fetch both reference image and submitted file as base64
     console.log('Fetching reference handwriting sample...');
-    const referenceBase64 = await fetchFileAsBase64(referenceImageUrl, supabase);
+    const { base64: referenceBase64, size: refSize } = await fetchFileAsBase64(referenceImageUrl, supabase);
+    console.log('Reference file size:', refSize, 'bytes');
     
     console.log('Fetching submitted document...');
-    const submissionBase64 = await fetchFileAsBase64(file_url, supabase);
+    const { base64: submissionBase64, size: subSize } = await fetchFileAsBase64(file_url, supabase);
+    console.log('Submission file size:', subSize, 'bytes');
+
+    // Check if files are too large for AI processing
+    if (submissionBase64.length > MAX_BASE64_SIZE) {
+      console.log('Submission file too large for AI processing:', submissionBase64.length);
+      const fallback = getFallbackResult('file_too_large');
+      
+      await supabase
+        .from('submissions')
+        .update({
+          ai_similarity_score: fallback.score,
+          ai_confidence_score: 0,
+          ai_risk_level: fallback.risk_level,
+          status: fallback.status,
+          verified_at: new Date().toISOString(),
+          ai_analysis_details: {
+            algorithm_version: '3.2-gemini-forensic',
+            error_type: fallback.error_type,
+            reason: fallback.message,
+            file_size: subSize,
+            recommendation: 'Please upload a smaller file or use image format instead of PDF'
+          },
+        })
+        .eq('id', submission_id);
+
+      return new Response(JSON.stringify({
+        success: true,
+        ...fallback
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // Determine file type for proper MIME
     const isImage = file_type?.toLowerCase().includes('image') || 
@@ -182,13 +282,22 @@ Focus strictly on forensic handwriting features including:
 3. Compare structural similarities and differences against the reference sample (first image)
 4. Compute an overall similarity score
 
-## IMPORTANT RULES:
-- Be tolerant of natural variation (pen, paper, speed, mood) but strict against different writers
-- In academic verification, false acceptance is worse than false rejection
-- If the document is typed/printed (not handwritten), set similarity_score to 0
-- If it's clearly a different person's handwriting, be confident and give low score
+## IMPORTANT SCORING RULES:
+- If the handwriting is clearly from the SAME writer (despite natural variation in pen, paper, speed, mood), give similarity_score >= 75
+- If the handwriting is clearly from a DIFFERENT writer, give similarity_score <= 30
+- For uncertain cases with some matching and some differing features, use 40-70 range
+- If document contains typed/printed text (not handwritten), set is_handwritten = false and similarity_score = 0
 
-## DECISION RULE:
+## DECISION RULES:
+- Be tolerant of natural variation but strict against different writers
+- In academic verification, false acceptance is worse than false rejection
+- If clearly same writer with high confidence → score 80-95
+- If probably same writer but some variation → score 65-79
+- If uncertain, could go either way → score 45-64
+- If probably different writer → score 25-44
+- If clearly different writer → score 0-24
+
+## FINAL DECISION:
 - similarity_score >= 70 → same_writer = true
 - similarity_score < 70 → same_writer = false
 
@@ -207,7 +316,7 @@ Output format exactly:
 }
 
 Work internally step-by-step but output only the final JSON.
-Prioritize speed, objectivity, and consistency.`;
+Prioritize accuracy, objectivity, and consistency.`;
 
     console.log('Calling Gemini AI for forensic comparison...');
 
@@ -242,37 +351,40 @@ Prioritize speed, objectivity, and consistency.`;
       const errorText = await aiResponse.text();
       console.error('AI Gateway error:', aiResponse.status, errorText);
       
+      let fallback: FallbackResult;
+      
       if (aiResponse.status === 429) {
-        throw new Error('Rate limit exceeded. Please try again later.');
-      }
-      if (aiResponse.status === 402) {
+        fallback = getFallbackResult('rate_limit');
+      } else if (aiResponse.status === 402) {
         throw new Error('AI credits exhausted. Please add credits to continue.');
+      } else if (errorText.includes('Memory limit') || errorText.includes('too large')) {
+        fallback = getFallbackResult('file_too_large');
+      } else {
+        fallback = getFallbackResult('ai_gateway_error');
       }
       
-      // For other errors, fall back to manual review
+      // For errors, fall back to manual review with specific error type
       console.log('AI failed, falling back to manual review');
       await supabase
         .from('submissions')
         .update({
-          ai_similarity_score: 60,
+          ai_similarity_score: fallback.score,
           ai_confidence_score: 0,
-          ai_risk_level: 'medium',
-          status: 'needs_manual_review',
+          ai_risk_level: fallback.risk_level,
+          status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '3.1-gemini-forensic',
+            algorithm_version: '3.2-gemini-forensic',
+            error_type: fallback.error_type,
             error: `AI analysis failed: ${aiResponse.status}`,
-            reason: 'Could not process document - requires faculty review'
+            reason: fallback.message
           },
         })
         .eq('id', submission_id);
 
       return new Response(JSON.stringify({
         success: true,
-        score: 60,
-        risk_level: 'medium',
-        status: 'needs_manual_review',
-        message: 'AI analysis failed - marked for manual review'
+        ...fallback
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -294,17 +406,19 @@ Prioritize speed, objectivity, and consistency.`;
       console.error('Failed to parse AI response:', parseError);
       console.log('Raw response:', responseText);
       
-      // Fall back to manual review
+      const fallback = getFallbackResult('parse_error');
+      
       await supabase
         .from('submissions')
         .update({
-          ai_similarity_score: 60,
+          ai_similarity_score: fallback.score,
           ai_confidence_score: 0,
-          ai_risk_level: 'medium',
-          status: 'needs_manual_review',
+          ai_risk_level: fallback.risk_level,
+          status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '3.1-gemini-forensic',
+            algorithm_version: '3.2-gemini-forensic',
+            error_type: fallback.error_type,
             error: 'Failed to parse AI response',
             raw_response: responseText.substring(0, 500)
           },
@@ -313,10 +427,7 @@ Prioritize speed, objectivity, and consistency.`;
 
       return new Response(JSON.stringify({
         success: true,
-        score: 60,
-        risk_level: 'medium',
-        status: 'needs_manual_review',
-        message: 'Could not parse AI response - marked for manual review'
+        ...fallback
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -354,7 +465,7 @@ Prioritize speed, objectivity, and consistency.`;
         status: status,
         verified_at: new Date().toISOString(),
         ai_analysis_details: {
-          algorithm_version: '3.1-gemini-forensic',
+          algorithm_version: '3.2-gemini-forensic',
           same_writer: verificationResult.same_writer,
           is_handwritten: isHandwritten,
           confidence_level: confidenceLevel,
@@ -396,15 +507,18 @@ Prioritize speed, objectivity, and consistency.`;
       const { submission_id } = await req.json().catch(() => ({}));
       if (submission_id) {
         const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+        const fallback = getFallbackResult('unknown');
+        
         await supabase
           .from('submissions')
           .update({
-            ai_similarity_score: 50,
-            ai_risk_level: 'medium',
-            status: 'needs_manual_review',
+            ai_similarity_score: fallback.score,
+            ai_risk_level: fallback.risk_level,
+            status: fallback.status,
             verified_at: new Date().toISOString(),
             ai_analysis_details: {
-              algorithm_version: '3.1-gemini-forensic',
+              algorithm_version: '3.2-gemini-forensic',
+              error_type: fallback.error_type,
               error: error instanceof Error ? error.message : 'Unknown error'
             },
           })
