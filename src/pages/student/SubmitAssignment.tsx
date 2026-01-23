@@ -354,8 +354,16 @@ const SubmitAssignment = () => {
               submissionId={verifyingSubmissionId}
               onComplete={(status, score) => {
                 console.log('Verification complete:', status, score);
-                // Auto-navigate after 3 seconds
-                setTimeout(() => navigate('/student/submissions'), 3000);
+                // Show toast based on result
+                if (status === 'verified') {
+                  toast.success('Handwriting verified successfully!');
+                } else if (status === 'needs_manual_review') {
+                  toast.info('Submission sent for manual review.');
+                } else {
+                  toast.warning('Please check your submission status.');
+                }
+                // Navigate after showing result for a moment
+                setTimeout(() => navigate('/student/submissions'), 2500);
               }}
             />
           </div>
