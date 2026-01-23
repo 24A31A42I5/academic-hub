@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { VerificationProgress } from '@/components/submission/VerificationProgress';
 import { toast } from 'sonner';
 import { Loader2, Upload, AlertTriangle, ArrowLeft, Clock, FileText, CheckCircle } from 'lucide-react';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
@@ -39,6 +40,8 @@ const SubmitAssignment = () => {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [verifyingSubmissionId, setVerifyingSubmissionId] = useState<string | null>(null);
+  const [showProgress, setShowProgress] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -184,9 +187,12 @@ const SubmitAssignment = () => {
         submissionId = newSubmission.id;
       }
 
-      // Trigger AI handwriting verification (non-blocking)
+      // Show verification progress
+      setVerifyingSubmissionId(submissionId);
+      setShowProgress(true);
       toast.success('Assignment submitted! AI verification started.');
       
+      // Trigger AI handwriting verification (non-blocking)
       supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submissionId,
@@ -194,19 +200,17 @@ const SubmitAssignment = () => {
           file_type: selectedFile.type,
           student_profile_id: profile.id,
         },
-       }).then(({ error }) => {
-         if (error) {
-           console.error('Verification error:', error);
-           toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
-         } else {
-           console.log('Handwriting verification completed');
-         }
-       }).catch((err) => {
-         console.error('Verification failed:', err);
-         toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
-       });
-
-      navigate('/student/submissions');
+      }).then(({ error }) => {
+        if (error) {
+          console.error('Verification error:', error);
+          toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
+        } else {
+          console.log('Handwriting verification completed');
+        }
+      }).catch((err) => {
+        console.error('Verification failed:', err);
+        toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
+      });
     } catch (error: any) {
       console.error('Error submitting assignment:', error);
       toast.error(error.message || 'Failed to submit assignment. Please try again.');
@@ -343,8 +347,22 @@ const SubmitAssignment = () => {
           </Alert>
         )}
 
+        {/* Verification Progress */}
+        {showProgress && verifyingSubmissionId && (
+          <div className="mb-6">
+            <VerificationProgress 
+              submissionId={verifyingSubmissionId}
+              onComplete={(status, score) => {
+                console.log('Verification complete:', status, score);
+                // Auto-navigate after 3 seconds
+                setTimeout(() => navigate('/student/submissions'), 3000);
+              }}
+            />
+          </div>
+        )}
+
         {/* Upload Section */}
-        <Card>
+        <Card className={showProgress ? 'opacity-50 pointer-events-none' : ''}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Upload className="w-5 h-5" />
