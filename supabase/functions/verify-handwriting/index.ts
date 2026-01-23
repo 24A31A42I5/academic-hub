@@ -18,8 +18,28 @@ const VERIFICATION_THRESHOLDS = {
   REUPLOAD: 0          // < 50: Reupload Required
 };
 
-async function fetchFileAsBase64(url: string): Promise<string> {
+async function fetchFileAsBase64(url: string, supabase?: any): Promise<string> {
   console.log('Fetching file:', url);
+  
+  // Check if this is a Supabase storage URL that needs a signed URL
+  const uploadsBucketMatch = url.match(/\/storage\/v1\/object\/public\/uploads\/(.+)$/);
+  if (uploadsBucketMatch && supabase) {
+    const filePath = uploadsBucketMatch[1];
+    console.log('Generating signed URL for private bucket, path:', filePath);
+    
+    const { data: signedData, error: signedError } = await supabase.storage
+      .from('uploads')
+      .createSignedUrl(filePath, 300); // 5 minute expiry
+    
+    if (signedError) {
+      console.error('Error creating signed URL:', signedError);
+      throw new Error(`Failed to access file: ${signedError.message}`);
+    }
+    
+    url = signedData.signedUrl;
+    console.log('Using signed URL');
+  }
+  
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch file: ${response.status}`);
@@ -116,10 +136,10 @@ serve(async (req) => {
 
     // Fetch both reference image and submitted file as base64
     console.log('Fetching reference handwriting sample...');
-    const referenceBase64 = await fetchFileAsBase64(referenceImageUrl);
+    const referenceBase64 = await fetchFileAsBase64(referenceImageUrl, supabase);
     
     console.log('Fetching submitted document...');
-    const submissionBase64 = await fetchFileAsBase64(file_url);
+    const submissionBase64 = await fetchFileAsBase64(file_url, supabase);
 
     // Determine file type for proper MIME
     const isImage = file_type?.toLowerCase().includes('image') || 
