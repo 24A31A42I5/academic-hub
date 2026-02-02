@@ -27,6 +27,7 @@ const VERIFICATION_TIMEOUT_MS = 5 * 60 * 1000;
 interface Submission {
   id: string;
   file_url: string;
+  file_urls: string[] | null;
   file_type: string;
   status: string | null;
   marks: number | null;
@@ -38,6 +39,7 @@ interface Submission {
   ai_similarity_score: number | null;
   ai_confidence_score: number | null;
   ai_analysis_details: any;
+  page_verification_results: any[] | null;
   assignment: {
     id: string;
     title: string;
@@ -73,6 +75,7 @@ const StudentSubmissions = () => {
       .select(`
         id,
         file_url,
+        file_urls,
         file_type,
         status,
         marks,
@@ -84,6 +87,7 @@ const StudentSubmissions = () => {
         ai_similarity_score,
         ai_confidence_score,
         ai_analysis_details,
+        page_verification_results,
         assignment:assignments (
           id,
           title,
@@ -508,8 +512,11 @@ const StudentSubmissions = () => {
                           </Tooltip>
                         )}
                         <Button variant="ghost" size="sm" asChild>
-                          <a href={submission.file_url} target="_blank" rel="noopener noreferrer">
+                          <a href={submission.file_url} target="_blank" rel="noopener noreferrer" title={submission.file_urls && submission.file_urls.length > 1 ? `${submission.file_urls.length} pages` : 'View file'}>
                             <ExternalLink className="w-4 h-4" />
+                            {submission.file_urls && submission.file_urls.length > 1 && (
+                              <span className="ml-1 text-xs">({submission.file_urls.length})</span>
+                            )}
                           </a>
                         </Button>
                       </div>

@@ -232,9 +232,11 @@ export type Database = {
           feedback: string | null
           file_type: string
           file_url: string
+          file_urls: string[] | null
           id: string
           is_late: boolean | null
           marks: number | null
+          page_verification_results: Json | null
           status: string | null
           student_profile_id: string
           submitted_at: string
@@ -251,9 +253,11 @@ export type Database = {
           feedback?: string | null
           file_type: string
           file_url: string
+          file_urls?: string[] | null
           id?: string
           is_late?: boolean | null
           marks?: number | null
+          page_verification_results?: Json | null
           status?: string | null
           student_profile_id: string
           submitted_at?: string
@@ -270,9 +274,11 @@ export type Database = {
           feedback?: string | null
           file_type?: string
           file_url?: string
+          file_urls?: string[] | null
           id?: string
           is_late?: boolean | null
           marks?: number | null
+          page_verification_results?: Json | null
           status?: string | null
           student_profile_id?: string
           submitted_at?: string
