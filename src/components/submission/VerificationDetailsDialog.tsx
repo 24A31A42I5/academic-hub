@@ -2,8 +2,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
-import { CheckCircle, XCircle, AlertTriangle, Brain, FileText, Info } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Brain, FileText, Info, Image } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+interface PageResult {
+  page: number;
+  similarity: number;
+  same_writer: boolean;
+  is_handwritten: boolean;
+  confidence?: string;
+}
 
 interface VerificationDetails {
   algorithm_version?: string;
@@ -17,6 +25,11 @@ interface VerificationDetails {
   error_type?: string;
   error?: string;
   reason?: string;
+  page_count?: number;
+  page_results?: PageResult[];
+  has_typed_content?: boolean;
+  has_different_writer?: boolean;
+  overall_similarity_score?: number;
 }
 
 interface VerificationDetailsDialogProps {
@@ -39,19 +52,27 @@ export const VerificationDetailsDialog = ({
   const details = submission.ai_analysis_details;
   const score = submission.ai_similarity_score;
   const riskLevel = submission.ai_risk_level;
+  const pageResults = details?.page_results || [];
 
   const getScoreColor = (score: number | null) => {
     if (score === null) return 'text-muted-foreground';
-    if (score >= 70) return 'text-green-600';
+    if (score >= 75) return 'text-green-600';
     if (score >= 50) return 'text-yellow-600';
     return 'text-red-600';
   };
 
   const getProgressColor = (score: number | null) => {
     if (score === null) return '';
-    if (score >= 70) return '[&>div]:bg-green-500';
+    if (score >= 75) return '[&>div]:bg-green-500';
     if (score >= 50) return '[&>div]:bg-yellow-500';
     return '[&>div]:bg-red-500';
+  };
+
+  const getPageBadgeColor = (result: PageResult) => {
+    if (!result.is_handwritten) return 'bg-purple-500/10 text-purple-600';
+    if (result.same_writer) return 'bg-green-500/10 text-green-600';
+    if (result.similarity >= 50) return 'bg-yellow-500/10 text-yellow-600';
+    return 'bg-red-500/10 text-red-600';
   };
 
   const getRiskBadge = () => {
@@ -121,10 +142,10 @@ export const VerificationDetailsDialog = ({
               </div>
             )}
             
-            {details.error_type === 'file_too_large' && (
+            {details.error_type === 'typed_content_detected' && (
               <div className="p-3 rounded-lg bg-muted">
                 <p className="text-sm">
-                  <strong>Tip:</strong> For better verification, use image formats (JPG, PNG) instead of PDF, or reduce file size.
+                  <strong>Issue:</strong> One or more pages contain typed/printed text. Please submit only handwritten pages.
                 </p>
               </div>
             )}
@@ -136,7 +157,7 @@ export const VerificationDetailsDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Brain className="w-5 h-5 text-primary" />
@@ -151,7 +172,7 @@ export const VerificationDetailsDialog = ({
           {/* Score Section */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Similarity Score</span>
+              <span className="text-sm font-medium">Overall Similarity Score</span>
               <span className={cn("text-2xl font-bold", getScoreColor(score))}>
                 {score !== null ? `${score}%` : 'N/A'}
               </span>
@@ -172,7 +193,55 @@ export const VerificationDetailsDialog = ({
             {getRiskBadge()}
           </div>
 
+          {/* Page Count Info */}
+          {details?.page_count && details.page_count > 1 && (
+            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Image className="w-4 h-4" />
+              <span>{details.page_count} pages analyzed</span>
+            </div>
+          )}
+
           <Separator />
+
+          {/* Per-Page Results */}
+          {pageResults.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <FileText className="w-4 h-4" />
+                Per-Page Results
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {pageResults.map((result, idx) => (
+                  <div
+                    key={idx}
+                    className={cn(
+                      "p-3 rounded-lg border",
+                      getPageBadgeColor(result)
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium">Page {result.page}</span>
+                      {!result.is_handwritten ? (
+                        <Badge variant="outline" className="text-xs py-0 h-5">Typed</Badge>
+                      ) : result.same_writer ? (
+                        <CheckCircle className="w-3 h-3" />
+                      ) : (
+                        <AlertTriangle className="w-3 h-3" />
+                      )}
+                    </div>
+                    <div className="text-lg font-bold">{result.similarity}%</div>
+                    <div className="text-xs opacity-75">
+                      {!result.is_handwritten 
+                        ? 'Not handwritten' 
+                        : result.same_writer 
+                          ? 'Same writer' 
+                          : 'Different writer'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Confidence Level */}
           {details?.confidence_level && (
@@ -241,7 +310,9 @@ export const VerificationDetailsDialog = ({
               <ul className="space-y-1 pl-6">
                 {details.critical_flags.map((flag, idx) => (
                   <li key={idx} className="text-sm text-red-600 list-disc">
-                    {flag}
+                    {flag === 'typed_content_detected' ? 'Typed/printed content detected' :
+                     flag === 'different_writer_detected' ? 'Different writer detected' :
+                     flag}
                   </li>
                 ))}
               </ul>

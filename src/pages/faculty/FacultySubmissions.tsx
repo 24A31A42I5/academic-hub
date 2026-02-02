@@ -42,6 +42,7 @@ interface StudentDetails {
 interface Submission {
   id: string;
   file_url: string;
+  file_urls: string[] | null;
   file_type: string;
   status: string | null;
   marks: number | null;
@@ -111,6 +112,7 @@ const FacultySubmissions = () => {
           .select(`
             id,
             file_url,
+            file_urls,
             file_type,
             status,
             marks,
@@ -757,6 +759,7 @@ const FacultySubmissions = () => {
         open={!!previewSubmission}
         onOpenChange={() => setPreviewSubmission(null)}
         fileUrl={previewSubmission?.file_url || null}
+        fileUrls={previewSubmission?.file_urls}
         fileType={previewSubmission?.file_type || null}
         studentName={previewSubmission?.student_profile?.full_name}
         assignmentTitle={previewSubmission?.assignment?.title}

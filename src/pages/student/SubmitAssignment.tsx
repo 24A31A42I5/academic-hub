@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { VerificationProgress } from '@/components/submission/VerificationProgress';
 import { toast } from 'sonner';
-import { Loader2, Upload, AlertTriangle, ArrowLeft, Clock, FileText, CheckCircle } from 'lucide-react';
+import { Loader2, Upload, AlertTriangle, ArrowLeft, Clock, FileText, CheckCircle, X, Image, GripVertical } from 'lucide-react';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 
 const navItems = [
@@ -31,6 +31,16 @@ interface Assignment {
   allowed_formats: string[] | null;
 }
 
+interface SelectedImage {
+  file: File;
+  preview: string;
+  id: string;
+}
+
+const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per image
+const MAX_IMAGES = 20;
+
 const SubmitAssignment = () => {
   const { assignmentId } = useParams<{ assignmentId: string }>();
   const { profile, user, loading: authLoading } = useAuth();
@@ -39,10 +49,12 @@ const SubmitAssignment = () => {
   const [existingSubmission, setExistingSubmission] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
   const [verifyingSubmissionId, setVerifyingSubmissionId] = useState<string | null>(null);
   const [showProgress, setShowProgress] = useState(false);
+  const [pageCount, setPageCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'student')) {
@@ -87,69 +99,133 @@ const SubmitAssignment = () => {
     }
   }, [profile, assignmentId]);
 
-  const getAcceptedFormats = () => {
-    const formats = assignment?.allowed_formats || ['pdf', 'doc', 'docx'];
-    const mimeTypes: Record<string, string> = {
-      pdf: '.pdf',
-      doc: '.doc',
-      docx: '.docx',
-      image: '.jpg,.jpeg,.png,.webp',
-      txt: '.txt',
+  // Cleanup preview URLs on unmount
+  useEffect(() => {
+    return () => {
+      selectedImages.forEach(img => URL.revokeObjectURL(img.preview));
     };
-    return formats.map(f => mimeTypes[f] || `.${f}`).join(',');
+  }, []);
+
+  const validateImageFile = (file: File): string | null => {
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      return `"${file.name}" is not a valid image. Only JPG, PNG, and WEBP are allowed.`;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      return `"${file.name}" is too large. Maximum file size is 10MB per image.`;
+    }
+    return null;
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
 
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('File size must be less than 10MB');
+    const newImages: SelectedImage[] = [];
+    const errors: string[] = [];
+
+    // Check total count
+    if (selectedImages.length + files.length > MAX_IMAGES) {
+      toast.error(`Maximum ${MAX_IMAGES} images allowed per submission.`);
       return;
     }
 
-    // Warn about large files that may have verification issues
-    if (file.size > 5 * 1024 * 1024) {
-      toast.warning(
-        'Large file detected. Handwriting verification may require manual review.',
-        { duration: 5000 }
-      );
+    Array.from(files).forEach(file => {
+      const error = validateImageFile(file);
+      if (error) {
+        errors.push(error);
+      } else {
+        newImages.push({
+          file,
+          preview: URL.createObjectURL(file),
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        });
+      }
+    });
+
+    if (errors.length > 0) {
+      errors.forEach(err => toast.error(err));
     }
 
-    setSelectedFile(file);
+    if (newImages.length > 0) {
+      setSelectedImages(prev => [...prev, ...newImages]);
+      setPageCount(prev => prev + newImages.length);
+    }
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeImage = (id: string) => {
+    setSelectedImages(prev => {
+      const img = prev.find(i => i.id === id);
+      if (img) {
+        URL.revokeObjectURL(img.preview);
+      }
+      return prev.filter(i => i.id !== id);
+    });
+    setPageCount(prev => prev - 1);
+  };
+
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+
+    const newImages = [...selectedImages];
+    const [draggedItem] = newImages.splice(draggedIndex, 1);
+    newImages.splice(index, 0, draggedItem);
+    setSelectedImages(newImages);
+    setDraggedIndex(index);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
   };
 
   const handleSubmit = async () => {
-    if (!selectedFile || !user || !profile || !assignment) return;
+    if (selectedImages.length === 0 || !user || !profile || !assignment) return;
 
     setUploading(true);
     try {
-      // Upload file to storage
-      const fileExt = selectedFile.name.split('.').pop();
-      const fileName = `${user.id}/${assignment.id}/${Date.now()}.${fileExt}`;
+      const uploadedUrls: string[] = [];
+      const timestamp = Date.now();
 
-      const { error: uploadError } = await supabase.storage
-        .from('uploads')
-        .upload(fileName, selectedFile, {
-          cacheControl: '3600',
-          upsert: true,
-        });
+      // Upload all images in order
+      for (let i = 0; i < selectedImages.length; i++) {
+        const img = selectedImages[i];
+        const ext = img.file.name.split('.').pop() || 'jpg';
+        const fileName = `${user.id}/${assignment.id}/page_${i + 1}_${timestamp}.${ext}`;
 
-      if (uploadError) throw uploadError;
+        const { error: uploadError } = await supabase.storage
+          .from('uploads')
+          .upload(fileName, img.file, {
+            cacheControl: '3600',
+            upsert: true,
+          });
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('uploads')
-        .getPublicUrl(fileName);
+        if (uploadError) throw uploadError;
+
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('uploads')
+          .getPublicUrl(fileName);
+
+        uploadedUrls.push(publicUrl);
+      }
 
       // Check if deadline passed
       const isLate = isPast(new Date(assignment.deadline));
 
-      // Base submission data (DRY)
+      // Base submission data
       const baseSubmission = {
-        file_url: publicUrl,
-        file_type: selectedFile.type,
+        file_url: uploadedUrls[0], // First image for backward compatibility
+        file_urls: uploadedUrls,
+        file_type: 'image/jpeg', // All submissions are now images
         submitted_at: new Date().toISOString(),
         is_late: isLate,
         status: 'pending',
@@ -158,6 +234,7 @@ const SubmitAssignment = () => {
         ai_risk_level: 'pending',
         ai_flagged_sections: null,
         ai_analysis_details: null,
+        page_verification_results: null,
         verified_at: null,
       };
 
@@ -190,15 +267,16 @@ const SubmitAssignment = () => {
       // Show verification progress
       setVerifyingSubmissionId(submissionId);
       setShowProgress(true);
-      toast.success('Assignment submitted! AI verification started.');
+      toast.success(`${uploadedUrls.length} page(s) submitted! AI verification started.`);
       
-      // Trigger AI handwriting verification (non-blocking)
+      // Trigger AI handwriting verification with all image URLs
       supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submissionId,
-          file_url: publicUrl,
-          file_type: selectedFile.type,
+          file_urls: uploadedUrls,
+          file_type: 'image/jpeg',
           student_profile_id: profile.id,
+          page_count: uploadedUrls.length,
         },
       }).then(({ error }) => {
         if (error) {
@@ -252,11 +330,10 @@ const SubmitAssignment = () => {
 
   const deadline = new Date(assignment.deadline);
   const isOverdue = isPast(deadline);
-  const allowedFormats = assignment.allowed_formats || ['pdf', 'doc', 'docx'];
 
   return (
     <DashboardLayout title="Submit Assignment" role="student" navItems={navItems}>
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-3xl mx-auto">
         <Link to="/student/assignments" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4">
           <ArrowLeft className="w-4 h-4 mr-1" />
           Back to Assignments
@@ -302,11 +379,11 @@ const SubmitAssignment = () => {
             </div>
 
             <div>
-              <p className="text-sm font-medium mb-2">Allowed Formats</p>
+              <p className="text-sm font-medium mb-2">Accepted Formats</p>
               <div className="flex flex-wrap gap-2">
-                {allowedFormats.map((f) => (
-                  <Badge key={f} variant="secondary">.{f}</Badge>
-                ))}
+                <Badge variant="secondary">.jpg</Badge>
+                <Badge variant="secondary">.png</Badge>
+                <Badge variant="secondary">.webp</Badge>
               </div>
             </div>
           </CardContent>
@@ -329,7 +406,7 @@ const SubmitAssignment = () => {
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>Reupload Required</AlertTitle>
             <AlertDescription>
-              Your last submission scored below 50 in handwriting verification. Please reupload a clear handwritten file.
+              Your last submission scored below 50 in handwriting verification. Please reupload clear handwritten images.
             </AlertDescription>
           </Alert>
         )}
@@ -342,7 +419,7 @@ const SubmitAssignment = () => {
             <AlertDescription>
               You have already submitted this assignment on{' '}
               {format(new Date(existingSubmission.submitted_at), 'MMM d, yyyy h:mm a')}.
-              Uploading a new file will replace your previous submission.
+              Uploading new images will replace your previous submission.
             </AlertDescription>
           </Alert>
         )}
@@ -352,9 +429,9 @@ const SubmitAssignment = () => {
           <div className="mb-6">
             <VerificationProgress 
               submissionId={verifyingSubmissionId}
+              pageCount={pageCount}
               onComplete={(status, score) => {
                 console.log('Verification complete:', status, score);
-                // Show toast based on result
                 if (status === 'verified') {
                   toast.success('Handwriting verified successfully!');
                 } else if (status === 'needs_manual_review') {
@@ -362,7 +439,6 @@ const SubmitAssignment = () => {
                 } else {
                   toast.warning('Please check your submission status.');
                 }
-                // Navigate after showing result for a moment
                 setTimeout(() => navigate('/student/submissions'), 2500);
               }}
             />
@@ -373,85 +449,136 @@ const SubmitAssignment = () => {
         <Card className={showProgress ? 'opacity-50 pointer-events-none' : ''}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Upload className="w-5 h-5" />
-              Upload Your Work
+              <Image className="w-5 h-5" />
+              Upload Handwritten Pages
             </CardTitle>
+            <CardDescription>
+              Upload images of your handwritten assignment (one image per page). 
+              Drag to reorder pages if needed.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="border-2 border-dashed rounded-lg p-8 text-center">
-              {selectedFile ? (
-                <div className="space-y-4">
-                  <FileText className="w-12 h-12 text-student mx-auto" />
-                  <div>
-                    <p className="font-medium">{selectedFile.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedFile(null);
-                      if (fileInputRef.current) fileInputRef.current.value = '';
-                    }}
+            {/* Image Grid */}
+            {selectedImages.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {selectedImages.map((img, index) => (
+                  <div
+                    key={img.id}
+                    draggable
+                    onDragStart={() => handleDragStart(index)}
+                    onDragOver={(e) => handleDragOver(e, index)}
+                    onDragEnd={handleDragEnd}
+                    className={`relative group border rounded-lg overflow-hidden bg-muted aspect-[3/4] cursor-move ${
+                      draggedIndex === index ? 'opacity-50 ring-2 ring-primary' : ''
+                    }`}
                   >
-                    Choose Different File
-                  </Button>
-                </div>
-              ) : (
-              <>
-                  <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-lg font-medium mb-2">Upload Your File</p>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Drag and drop or click to browse
-                  </p>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept={getAcceptedFormats()}
-                    onChange={handleFileSelect}
-                    className="hidden"
-                    id="file-upload"
-                  />
-                  <Button
-                    variant="student"
+                    <img
+                      src={img.preview}
+                      alt={`Page ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => removeImage(img.id)}
+                        className="h-8"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <div className="absolute top-1 left-1 flex items-center gap-1">
+                      <Badge variant="secondary" className="text-xs py-0">
+                        Page {index + 1}
+                      </Badge>
+                    </div>
+                    <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <GripVertical className="w-4 h-4 text-white" />
+                    </div>
+                  </div>
+                ))}
+                
+                {/* Add More Button */}
+                {selectedImages.length < MAX_IMAGES && (
+                  <button
                     onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed rounded-lg aspect-[3/4] flex flex-col items-center justify-center text-muted-foreground hover:border-primary hover:text-primary transition-colors"
                   >
-                    <Upload className="w-4 h-4 mr-2" />
-                    Choose File
-                  </Button>
-                  <div className="mt-4 space-y-1">
-                    <p className="text-xs text-muted-foreground">
-                      Max file size: 10MB. Handwriting will be verified automatically by our AI system.
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      <strong>Tip:</strong> For best verification results, use JPG or PNG images instead of PDF.
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {selectedFile && (
-              <Button
-                variant="student"
-                className="w-full"
-                onClick={handleSubmit}
-                disabled={uploading}
-              >
-                {uploading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    Uploading...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4 mr-2" />
-                    {existingSubmission ? 'Update Submission' : 'Submit Assignment'}
-                  </>
+                    <Upload className="w-8 h-8 mb-2" />
+                    <span className="text-xs">Add Page</span>
+                  </button>
                 )}
-              </Button>
+              </div>
+            )}
+
+            {/* Initial Upload Area */}
+            {selectedImages.length === 0 && (
+              <div className="border-2 border-dashed rounded-lg p-8 text-center">
+                <Image className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-lg font-medium mb-2">Upload Handwritten Assignment Images</p>
+                <p className="text-sm text-muted-foreground mb-1">
+                  One image per handwritten page
+                </p>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Supported formats: JPG, PNG, WEBP (max 10MB each)
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.webp"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  id="file-upload"
+                />
+                <Button
+                  variant="student"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Choose Images
+                </Button>
+                <p className="text-xs text-muted-foreground mt-4">
+                  Handwriting will be verified automatically by AI on each page.
+                </p>
+              </div>
+            )}
+
+            {/* Hidden file input for adding more */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".jpg,.jpeg,.png,.webp"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            {/* Submit Button */}
+            {selectedImages.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground text-center">
+                  {selectedImages.length} page{selectedImages.length > 1 ? 's' : ''} ready to submit
+                </p>
+                <Button
+                  variant="student"
+                  className="w-full"
+                  onClick={handleSubmit}
+                  disabled={uploading}
+                >
+                  {uploading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      Uploading {selectedImages.length} page(s)...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 mr-2" />
+                      {existingSubmission ? 'Update Submission' : 'Submit Assignment'}
+                    </>
+                  )}
+                </Button>
+              </div>
             )}
           </CardContent>
         </Card>
