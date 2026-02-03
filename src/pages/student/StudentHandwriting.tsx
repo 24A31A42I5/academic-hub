@@ -164,21 +164,17 @@ const StudentHandwriting = () => {
       // Upload to storage
       const fileName = `${user.id}/handwriting.jpg`;
 
+      // Use upsert: true to allow re-upload when admin has deleted the old sample
       const { error: uploadError } = await supabase.storage
         .from('handwriting-samples')
         .upload(fileName, strippedImage, {
-          cacheControl: '3600',
-          upsert: false,
+          cacheControl: '0', // No cache to ensure fresh image
+          upsert: true, // Allow overwriting if admin deleted the DB reference but file exists
           contentType: 'image/jpeg',
         });
 
       if (uploadError) {
-        if (uploadError.message.includes('already exists')) {
-          toast.error('Handwriting sample already uploaded');
-        } else {
-          throw uploadError;
-        }
-        return;
+        throw uploadError;
       }
 
       // Get public URL
@@ -354,9 +350,10 @@ const StudentHandwriting = () => {
 
                 <div className="border rounded-lg overflow-hidden">
                   <img 
-                    src={studentDetails.handwriting_url} 
+                    src={`${studentDetails.handwriting_url}?t=${studentDetails.handwriting_submitted_at || Date.now()}`} 
                     alt="Your handwriting sample"
                     className="w-full h-auto max-h-96 object-contain bg-muted"
+                    key={studentDetails.handwriting_submitted_at}
                   />
                 </div>
 
