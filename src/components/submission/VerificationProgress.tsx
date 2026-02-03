@@ -158,13 +158,17 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
         )
         .subscribe();
 
-      // Timeout fallback after 90 seconds (longer for multi-page)
+      // Timeout fallback after 180 seconds (3 minutes for multi-page)
+      // Only show timeout if verification hasn't completed via realtime
       const timeoutTimer = setTimeout(() => {
+        // Double-check current state before setting error
+        // The realtime subscription may have updated isComplete
         if (!isComplete) {
-          setError('Verification taking longer than expected. Check your submissions page.');
+          // Don't show error, just set to complete - backend may still be processing
+          // and user can check submissions page
           setStage('complete');
         }
-      }, 90000);
+      }, 180000);
 
       return () => {
         stageTimers.forEach(clearTimeout);
@@ -180,11 +184,12 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
                       CheckCircle;
 
     const getResultBadge = () => {
-      if (error) {
+      // Only show timeout if we explicitly have an error AND no valid riskLevel came through
+      if (error && !riskLevel) {
         return (
-          <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold border-accent bg-secondary text-secondary-foreground">
-            <AlertTriangle className="w-3 h-3 mr-1" />
-            Timeout
+          <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold border-muted bg-secondary text-muted-foreground">
+            <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            Processing
           </span>
         );
       }

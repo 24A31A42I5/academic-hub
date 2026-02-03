@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { VerificationDetailsDialog } from '@/components/submission/VerificationDetailsDialog';
-import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload, Eye } from 'lucide-react';
+import FilePreviewDialog from '@/components/faculty/FilePreviewDialog';
+import { Loader2, FileText, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -66,6 +67,7 @@ const StudentSubmissions = () => {
   const [verifyingIds, setVerifyingIds] = useState<Set<string>>(new Set());
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
+  const [previewSubmission, setPreviewSubmission] = useState<Submission | null>(null);
 
   const fetchSubmissions = useCallback(async () => {
     if (!profile) return;
@@ -307,7 +309,7 @@ const StudentSubmissions = () => {
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Score 50–79: faculty manual review required</p>
+              <p>Score 50–69: faculty manual review required</p>
             </TooltipContent>
           </Tooltip>
         );
@@ -511,13 +513,16 @@ const StudentSubmissions = () => {
                             </TooltipContent>
                           </Tooltip>
                         )}
-                        <Button variant="ghost" size="sm" asChild>
-                          <a href={submission.file_url} target="_blank" rel="noopener noreferrer" title={submission.file_urls && submission.file_urls.length > 1 ? `${submission.file_urls.length} pages` : 'View file'}>
-                            <ExternalLink className="w-4 h-4" />
-                            {submission.file_urls && submission.file_urls.length > 1 && (
-                              <span className="ml-1 text-xs">({submission.file_urls.length})</span>
-                            )}
-                          </a>
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => setPreviewSubmission(submission)}
+                          title={submission.file_urls && submission.file_urls.length > 1 ? `View ${submission.file_urls.length} pages` : 'View file'}
+                        >
+                          <Eye className="w-4 h-4" />
+                          {submission.file_urls && submission.file_urls.length > 1 && (
+                            <span className="ml-1 text-xs">({submission.file_urls.length})</span>
+                          )}
                         </Button>
                       </div>
                     </TableCell>
@@ -542,6 +547,17 @@ const StudentSubmissions = () => {
           }}
         />
       )}
+
+      {/* File Preview Dialog */}
+      <FilePreviewDialog
+        open={!!previewSubmission}
+        onOpenChange={() => setPreviewSubmission(null)}
+        fileUrl={previewSubmission?.file_url || null}
+        fileUrls={previewSubmission?.file_urls}
+        fileType={previewSubmission?.file_type || null}
+        studentName={profile?.full_name}
+        assignmentTitle={previewSubmission?.assignment?.title}
+      />
     </DashboardLayout>
   );
 };

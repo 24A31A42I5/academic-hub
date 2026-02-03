@@ -215,6 +215,15 @@ const FacultySubmissions = () => {
   const handleGrade = async (sendEmail: boolean = false) => {
     if (!gradeSubmission) return;
 
+    // Validate marks
+    if (gradeForm.marks) {
+      const marksValue = parseFloat(gradeForm.marks);
+      if (marksValue < 0 || marksValue > 5) {
+        toast.error('Marks must be between 0 and 5');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const { error } = await supabase
@@ -370,7 +379,7 @@ const FacultySubmissions = () => {
                 Manual Review
               </Badge>
             </TooltipTrigger>
-            <TooltipContent>Score 50–79: manual review required</TooltipContent>
+            <TooltipContent>Score 50–69: manual review required</TooltipContent>
           </Tooltip>
         );
       case 'low':
@@ -382,7 +391,7 @@ const FacultySubmissions = () => {
                 Verified
               </Badge>
             </TooltipTrigger>
-            <TooltipContent>Score ≥ 80: handwriting verified</TooltipContent>
+            <TooltipContent>Score ≥ 70: handwriting verified</TooltipContent>
           </Tooltip>
         );
       case 'unverified':
@@ -645,11 +654,13 @@ const FacultySubmissions = () => {
                         <TableCell className="text-right">
                           {!item.notSubmitted && (
                             <div className="flex justify-end gap-2">
-                              {item.file_url && canGradeSubmission(item as Submission) && (
-                                <Button variant="ghost" size="sm" asChild>
-                                  <a href={item.file_url} target="_blank" rel="noopener noreferrer">
-                                    <ExternalLink className="w-4 h-4" />
-                                  </a>
+                              {(item.file_url || item.file_urls?.length > 0) && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => setPreviewSubmission(item as Submission)}
+                                >
+                                  <Eye className="w-4 h-4" />
                                 </Button>
                               )}
                               {canGradeSubmission(item as Submission) ? (
@@ -706,13 +717,25 @@ const FacultySubmissions = () => {
                 )}
               </div>
               <div>
-                <Label>Marks</Label>
+                <Label>Marks (max 5)</Label>
                 <Input
                   type="number"
+                  min={0}
+                  max={5}
+                  step={0.5}
                   value={gradeForm.marks}
-                  onChange={(e) => setGradeForm({ ...gradeForm, marks: e.target.value })}
-                  placeholder="Enter marks"
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    const numValue = parseFloat(value);
+                    if (value === '' || (numValue >= 0 && numValue <= 5)) {
+                      setGradeForm({ ...gradeForm, marks: value });
+                    }
+                  }}
+                  placeholder="Enter marks (0-5)"
                 />
+                {gradeForm.marks && parseFloat(gradeForm.marks) > 5 && (
+                  <p className="text-xs text-destructive mt-1">Marks cannot exceed 5</p>
+                )}
               </div>
               <div>
                 <Label>Feedback</Label>
