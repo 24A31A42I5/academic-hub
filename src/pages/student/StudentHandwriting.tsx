@@ -298,6 +298,19 @@ const StudentHandwriting = () => {
   const hasHandwriting = !!studentDetails?.handwriting_url;
   const hasFeatures = !!studentDetails?.handwriting_feature_embedding;
 
+  const getHandwritingImageSrc = () => {
+    const base = studentDetails?.handwriting_url as string | undefined;
+    if (!base) return null;
+
+    // Cache-bust so overwriting `handwriting.webp` (upsert) shows the latest image immediately.
+    const version =
+      studentDetails?.handwriting_submitted_at ||
+      studentDetails?.handwriting_features_extracted_at ||
+      String(Date.now());
+    const joiner = base.includes('?') ? '&' : '?';
+    return `${base}${joiner}v=${encodeURIComponent(version)}`;
+  };
+
   return (
     <DashboardLayout title="My Handwriting" role="student" navItems={navItems}>
       {studentDetails && (
@@ -343,9 +356,9 @@ const StudentHandwriting = () => {
                   )}
                 </div>
 
-                <div className="border rounded-lg overflow-hidden">
-                  <img 
-                    src={studentDetails.handwriting_url} 
+                 <div className="border rounded-lg overflow-hidden">
+                   <img 
+                     src={getHandwritingImageSrc() || studentDetails.handwriting_url} 
                     alt="Your handwriting sample"
                     className="w-full h-auto max-h-96 object-contain bg-muted"
                   />
