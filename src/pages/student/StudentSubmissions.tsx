@@ -9,8 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { VerificationDetailsDialog } from '@/components/submission/VerificationDetailsDialog';
-import FilePreviewDialog from '@/components/faculty/FilePreviewDialog';
-import { Loader2, FileText, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload, Eye } from 'lucide-react';
+import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -67,11 +66,6 @@ const StudentSubmissions = () => {
   const [verifyingIds, setVerifyingIds] = useState<Set<string>>(new Set());
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
-  const [previewSubmission, setPreviewSubmission] = useState<Submission | null>(null);
-
-  const handleViewSubmissionFiles = (submission: Submission) => {
-    setPreviewSubmission(submission);
-  };
 
   const fetchSubmissions = useCallback(async () => {
     if (!profile) return;
@@ -122,29 +116,10 @@ const StudentSubmissions = () => {
     toast.info('Starting verification...', { duration: 2000 });
 
     try {
-      // Resolve stable storage paths to signed URLs if needed (uploads bucket is private).
-      const refs = (submission.file_urls && submission.file_urls.length > 0)
-        ? submission.file_urls
-        : [submission.file_url];
-
-      const needsSigning = refs.some(r => r && !r.startsWith('http'));
-      let verificationUrls = refs as string[];
-
-      if (needsSigning) {
-        const { data: signedData, error: signedError } = await supabase.storage
-          .from('uploads')
-          .createSignedUrls(refs, 60 * 60);
-
-        if (signedError) throw signedError;
-        verificationUrls = (signedData || [])
-          .map((s: any) => s?.signedUrl)
-          .filter((u: any): u is string => typeof u === 'string' && u.length > 0);
-      }
-
       const { data, error } = await supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submission.id,
-          file_urls: verificationUrls,
+          file_url: submission.file_url,
           file_type: submission.file_type,
           student_profile_id: profile?.id,
         },
@@ -314,11 +289,11 @@ const StudentSubmissions = () => {
             <TooltipTrigger>
               <Badge className="bg-green-500/10 text-green-600 gap-1">
                 <CheckCircle className="w-3 h-3" />
-                Verified ({submission.ai_similarity_score}%)
+                Verified
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Score ≥ 70%: Handwriting verified successfully</p>
+              <p>Handwriting matches your reference sample</p>
             </TooltipContent>
           </Tooltip>
         );
@@ -328,11 +303,11 @@ const StudentSubmissions = () => {
             <TooltipTrigger>
               <Badge className="bg-yellow-500/10 text-yellow-600 gap-1">
                 <AlertTriangle className="w-3 h-3" />
-                Manual Review ({submission.ai_similarity_score}%)
+                Manual Review
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Score 50–69%: Faculty manual review required. You can resubmit.</p>
+              <p>Score 50–79: faculty manual review required</p>
             </TooltipContent>
           </Tooltip>
         );
@@ -341,12 +316,12 @@ const StudentSubmissions = () => {
           <Tooltip>
             <TooltipTrigger>
               <Badge variant="destructive" className="gap-1">
-                <XCircle className="w-3 h-3" />
-                Not Same Handwriting ({submission.ai_similarity_score}%)
+                <AlertTriangle className="w-3 h-3" />
+                Reupload Required
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Score &lt; 50%: Handwriting doesn't match. Please resubmit with your own handwriting.</p>
+              <p>Score &lt; 50: please reupload a clearer handwritten submission</p>
             </TooltipContent>
           </Tooltip>
         );
@@ -518,37 +493,31 @@ const StudentSubmissions = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {/* Reupload button for high risk OR medium risk submissions */}
-                        {(submission.ai_risk_level === 'high' || submission.ai_risk_level === 'medium') && submission.status !== 'graded' && (
+                        {submission.ai_risk_level === 'high' && submission.status !== 'graded' && (
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button 
                                 variant="outline" 
                                 size="sm"
                                 onClick={() => navigate(`/student/assignments/${submission.assignment?.id}`)}
-                                className={`h-7 text-xs ${submission.ai_risk_level === 'high' ? 'text-destructive border-destructive/50' : 'text-yellow-600 border-yellow-500/50'}`}
+                                className="h-7 text-xs text-destructive border-destructive/50"
                               >
                                 <Upload className="w-3 h-3 mr-1" />
-                                Resubmit
+                                Reupload
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              <p>{submission.ai_risk_level === 'high' 
-                                ? 'Score < 50%: Please reupload a clearer handwritten file' 
-                                : 'Score 50-69%: You can resubmit for better verification'}</p>
+                              <p>Your submission requires a clearer handwritten file</p>
                             </TooltipContent>
                           </Tooltip>
                         )}
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => handleViewSubmissionFiles(submission)}
-                          title={submission.file_urls && submission.file_urls.length > 1 ? `View ${submission.file_urls.length} pages` : 'View file'}
-                        >
-                          <Eye className="w-4 h-4" />
-                          {submission.file_urls && submission.file_urls.length > 1 && (
-                            <span className="ml-1 text-xs">({submission.file_urls.length})</span>
-                          )}
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={submission.file_url} target="_blank" rel="noopener noreferrer" title={submission.file_urls && submission.file_urls.length > 1 ? `${submission.file_urls.length} pages` : 'View file'}>
+                            <ExternalLink className="w-4 h-4" />
+                            {submission.file_urls && submission.file_urls.length > 1 && (
+                              <span className="ml-1 text-xs">({submission.file_urls.length})</span>
+                            )}
+                          </a>
                         </Button>
                       </div>
                     </TableCell>
@@ -573,18 +542,6 @@ const StudentSubmissions = () => {
           }}
         />
       )}
-
-      {/* File Preview Dialog for viewing all pages */}
-      <FilePreviewDialog
-        open={!!previewSubmission}
-        onOpenChange={() => setPreviewSubmission(null)}
-        submissionId={previewSubmission?.id || null}
-        fileUrl={previewSubmission?.file_url || null}
-        fileUrls={previewSubmission?.file_urls}
-        fileType={previewSubmission?.file_type || null}
-        studentName={profile?.full_name}
-        assignmentTitle={previewSubmission?.assignment?.title}
-      />
     </DashboardLayout>
   );
 };

@@ -41,7 +41,6 @@ interface AIAnalysisDetails {
 interface FlaggedSubmission {
   id: string;
   file_url: string;
-  file_urls?: string[] | null;
   file_type: string;
   status: string | null;
   marks: number | null;
@@ -91,7 +90,6 @@ const FacultyReviews = () => {
         .select(`
           id,
           file_url,
-          file_urls,
           file_type,
           status,
           marks,
@@ -343,13 +341,10 @@ const FacultyReviews = () => {
                     </div>
                   </div>
                   <div className="flex gap-2 ml-4">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setPreviewSubmission(submission)}
-                      title="View submission"
-                    >
-                      <ExternalLink className="w-4 h-4" />
+                    <Button variant="ghost" size="sm" asChild>
+                      <a href={submission.file_url} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
                     </Button>
                     <Button variant="faculty" size="sm" onClick={() => openReview(submission)}>
                       <Eye className="w-4 h-4 mr-1" />
@@ -454,9 +449,7 @@ const FacultyReviews = () => {
       <FilePreviewDialog
         open={!!previewSubmission}
         onOpenChange={() => setPreviewSubmission(null)}
-        submissionId={previewSubmission?.id || null}
         fileUrl={previewSubmission?.file_url || null}
-        fileUrls={previewSubmission?.file_urls}
         fileType={previewSubmission?.file_type || null}
         studentName={previewSubmission?.student_profile?.full_name}
         assignmentTitle={previewSubmission?.assignment?.title}

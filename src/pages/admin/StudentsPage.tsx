@@ -327,10 +327,7 @@ const StudentsPage = () => {
         .from('student_details')
         .update({ 
           handwriting_url: null, 
-          handwriting_submitted_at: null,
-          handwriting_image_hash: null,
-          handwriting_feature_embedding: null,
-          handwriting_features_extracted_at: null,
+          handwriting_submitted_at: null 
         })
         .eq('profile_id', student.id);
 

@@ -158,14 +158,13 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
         )
         .subscribe();
 
-      // Timeout fallback after 3 minutes (longer for multi-page)
+      // Timeout fallback after 90 seconds (longer for multi-page)
       const timeoutTimer = setTimeout(() => {
         if (!isComplete) {
-          // Just mark as complete and let the user check submissions page
+          setError('Verification taking longer than expected. Check your submissions page.');
           setStage('complete');
-          // Don't show error - verification might have completed via realtime
         }
-      }, 180000); // 3 minutes
+      }, 90000);
 
       return () => {
         stageTimers.forEach(clearTimeout);
@@ -181,6 +180,15 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
                       CheckCircle;
 
     const getResultBadge = () => {
+      if (error) {
+        return (
+          <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold border-accent bg-secondary text-secondary-foreground">
+            <AlertTriangle className="w-3 h-3 mr-1" />
+            Timeout
+          </span>
+        );
+      }
+
       if (!isComplete || !riskLevel) return null;
 
       switch (riskLevel) {
@@ -188,12 +196,12 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
           return (
             <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold text-[hsl(142,76%,36%)] border-[hsl(142,76%,36%)] bg-secondary">
               <CheckCircle className="w-3 h-3 mr-1" />
-              Verified ({score}%) - Same Handwriting
+              Verified ({score}%)
             </span>
           );
         case 'medium':
           return (
-            <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold text-yellow-600 border-yellow-500 bg-yellow-50">
+            <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold text-accent-foreground border-accent bg-secondary">
               <AlertTriangle className="w-3 h-3 mr-1" />
               Manual Review ({score}%)
             </span>
@@ -202,7 +210,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
           return (
             <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-destructive text-destructive-foreground">
               <XCircle className="w-3 h-3 mr-1" />
-              Not Same Handwriting ({score}%)
+              Reupload Required ({score}%)
             </span>
           );
         default:
@@ -296,15 +304,15 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
             )}
 
             {/* Analysis Details */}
-            {isComplete && pageResults.length <= 1 && (
+            {isComplete && !error && pageResults.length <= 1 && (
               <div className="pt-2 border-t border-border/50">
                 <p className="text-xs text-muted-foreground">
-                  {riskLevel === 'low' && `✓ Score ≥70%: Handwriting verified as same writer. Your submission matches your profile.`}
+                  {riskLevel === 'low' && 'Handwriting verified successfully. Your submission matches your profile.'}
                   {riskLevel === 'medium' && errorType === 'no_profile' && 'No handwriting profile found. Please upload your handwriting sample.'}
                   {riskLevel === 'medium' && errorType === 'file_too_large' && 'File too large for automatic analysis. Try using smaller images.'}
                   {riskLevel === 'medium' && errorType === 'typed_content_detected' && 'Typed/printed content detected. Please submit handwritten pages only.'}
-                  {riskLevel === 'medium' && !errorType && `Score 50-69%: Manual review required. Faculty will check. You may resubmit for better results.`}
-                  {riskLevel === 'high' && `Score <50%: Handwriting doesn't appear to match your profile. Please resubmit with your own handwriting.`}
+                  {riskLevel === 'medium' && !errorType && 'Some differences detected. Faculty will review your submission.'}
+                  {riskLevel === 'high' && 'Significant differences detected. Please reupload clear handwritten images.'}
                 </p>
               </div>
             )}

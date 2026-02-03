@@ -89,7 +89,7 @@ const StudentHandwriting = () => {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
-  // Strip EXIF data by re-encoding the image to WebP
+  // Strip EXIF data by re-encoding the image
   const stripExifData = async (file: File): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const img = document.createElement('img');
@@ -107,7 +107,7 @@ const StudentHandwriting = () => {
           } else {
             reject(new Error('Failed to process image'));
           }
-        }, 'image/webp', 0.92);
+        }, 'image/jpeg', 0.95);
       };
 
       img.onerror = () => reject(new Error('Failed to load image'));
@@ -161,16 +161,25 @@ const StudentHandwriting = () => {
       // Strip EXIF data
       const strippedImage = await stripExifData(selectedFile);
       
-      // Upload to storage - use upsert: true to allow re-uploads after admin approval
-      const fileName = `${user.id}/handwriting.webp`;
+      // Upload to storage
+      const fileName = `${user.id}/handwriting.jpg`;
 
       const { error: uploadError } = await supabase.storage
         .from('handwriting-samples')
         .upload(fileName, strippedImage, {
           cacheControl: '3600',
-          upsert: true, // Allow overwriting for approved re-uploads
-          contentType: 'image/webp',
+          upsert: false,
+          contentType: 'image/jpeg',
         });
+
+      if (uploadError) {
+        if (uploadError.message.includes('already exists')) {
+          toast.error('Handwriting sample already uploaded');
+        } else {
+          throw uploadError;
+        }
+        return;
+      }
 
       // Get public URL
       const { data: { publicUrl } } = supabase.storage
@@ -298,19 +307,6 @@ const StudentHandwriting = () => {
   const hasHandwriting = !!studentDetails?.handwriting_url;
   const hasFeatures = !!studentDetails?.handwriting_feature_embedding;
 
-  const getHandwritingImageSrc = () => {
-    const base = studentDetails?.handwriting_url as string | undefined;
-    if (!base) return null;
-
-    // Cache-bust so overwriting `handwriting.webp` (upsert) shows the latest image immediately.
-    const version =
-      studentDetails?.handwriting_submitted_at ||
-      studentDetails?.handwriting_features_extracted_at ||
-      String(Date.now());
-    const joiner = base.includes('?') ? '&' : '?';
-    return `${base}${joiner}v=${encodeURIComponent(version)}`;
-  };
-
   return (
     <DashboardLayout title="My Handwriting" role="student" navItems={navItems}>
       {studentDetails && (
@@ -356,9 +352,9 @@ const StudentHandwriting = () => {
                   )}
                 </div>
 
-                 <div className="border rounded-lg overflow-hidden">
-                   <img 
-                     src={getHandwritingImageSrc() || studentDetails.handwriting_url} 
+                <div className="border rounded-lg overflow-hidden">
+                  <img 
+                    src={studentDetails.handwriting_url} 
                     alt="Your handwriting sample"
                     className="w-full h-auto max-h-96 object-contain bg-muted"
                   />
