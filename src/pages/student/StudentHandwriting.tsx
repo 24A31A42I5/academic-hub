@@ -89,7 +89,7 @@ const StudentHandwriting = () => {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
-  // Strip EXIF data by re-encoding the image
+  // Strip EXIF data by re-encoding the image to WebP
   const stripExifData = async (file: File): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const img = document.createElement('img');
@@ -107,7 +107,7 @@ const StudentHandwriting = () => {
           } else {
             reject(new Error('Failed to process image'));
           }
-        }, 'image/jpeg', 0.95);
+        }, 'image/webp', 0.92);
       };
 
       img.onerror = () => reject(new Error('Failed to load image'));
@@ -161,25 +161,16 @@ const StudentHandwriting = () => {
       // Strip EXIF data
       const strippedImage = await stripExifData(selectedFile);
       
-      // Upload to storage
-      const fileName = `${user.id}/handwriting.jpg`;
+      // Upload to storage - use upsert: true to allow re-uploads after admin approval
+      const fileName = `${user.id}/handwriting.webp`;
 
       const { error: uploadError } = await supabase.storage
         .from('handwriting-samples')
         .upload(fileName, strippedImage, {
           cacheControl: '3600',
-          upsert: false,
-          contentType: 'image/jpeg',
+          upsert: true, // Allow overwriting for approved re-uploads
+          contentType: 'image/webp',
         });
-
-      if (uploadError) {
-        if (uploadError.message.includes('already exists')) {
-          toast.error('Handwriting sample already uploaded');
-        } else {
-          throw uploadError;
-        }
-        return;
-      }
 
       // Get public URL
       const { data: { publicUrl } } = supabase.storage
