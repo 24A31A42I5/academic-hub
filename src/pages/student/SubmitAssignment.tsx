@@ -192,7 +192,7 @@ const SubmitAssignment = () => {
 
     setUploading(true);
     try {
-      const uploadedUrls: string[] = [];
+      const uploadedPaths: string[] = [];
       const timestamp = Date.now();
 
       // Upload all images in order
@@ -210,12 +210,23 @@ const SubmitAssignment = () => {
 
         if (uploadError) throw uploadError;
 
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('uploads')
-          .getPublicUrl(fileName);
+        // Store stable storage path in DB (bucket is private; we resolve to signed URLs at view-time)
+        uploadedPaths.push(fileName);
+      }
 
-        uploadedUrls.push(publicUrl);
+      // Create fresh signed URLs for AI verification (short-lived)
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from('uploads')
+        .createSignedUrls(uploadedPaths, 60 * 60);
+
+      if (signedError) throw signedError;
+
+      const signedUrls: string[] = (signedData || [])
+        .map((s: any) => s?.signedUrl)
+        .filter((u: any): u is string => typeof u === 'string' && u.length > 0);
+
+      if (signedUrls.length !== uploadedPaths.length) {
+        throw new Error('Failed to generate signed URLs for uploaded pages');
       }
 
       // Check if deadline passed
@@ -223,8 +234,8 @@ const SubmitAssignment = () => {
 
       // Base submission data
       const baseSubmission = {
-        file_url: uploadedUrls[0], // First image for backward compatibility
-        file_urls: uploadedUrls,
+        file_url: uploadedPaths[0], // First path for backward compatibility
+        file_urls: uploadedPaths,
         file_type: 'image/jpeg', // All submissions are now images
         submitted_at: new Date().toISOString(),
         is_late: isLate,
@@ -267,16 +278,16 @@ const SubmitAssignment = () => {
       // Show verification progress
       setVerifyingSubmissionId(submissionId);
       setShowProgress(true);
-      toast.success(`${uploadedUrls.length} page(s) submitted! AI verification started.`);
+      toast.success(`${uploadedPaths.length} page(s) submitted! AI verification started.`);
       
       // Trigger AI handwriting verification with all image URLs
       supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submissionId,
-          file_urls: uploadedUrls,
+          file_urls: signedUrls,
           file_type: 'image/jpeg',
           student_profile_id: profile.id,
-          page_count: uploadedUrls.length,
+          page_count: signedUrls.length,
         },
       }).then(({ error }) => {
         if (error) {

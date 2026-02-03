@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ExternalLink, Download, Image, Loader2, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
 
 interface FilePreviewDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  submissionId?: string | null;
   fileUrl: string | null;
   fileUrls?: string[] | null;
   fileType: string | null;
@@ -18,6 +20,7 @@ interface FilePreviewDialogProps {
 const FilePreviewDialog = ({
   open,
   onOpenChange,
+  submissionId,
   fileUrl,
   fileUrls,
   fileType,
@@ -28,15 +31,61 @@ const FilePreviewDialog = ({
   const [error, setError] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
 
-  // Use fileUrls if available, otherwise fall back to single fileUrl
-  const allUrls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
+  const rawRefs = useMemo(() => {
+    // Use fileUrls if available, otherwise fall back to single fileUrl
+    return fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
+  }, [fileUrl, fileUrls]);
+
+  const [resolvedUrls, setResolvedUrls] = useState<string[]>([]);
+  const allUrls = resolvedUrls.length > 0 ? resolvedUrls : rawRefs;
+
   const totalPages = allUrls.length;
   const currentUrl = allUrls[currentPage] || null;
 
-  if (!currentUrl) return null;
+  // Resolve to fresh signed URLs when submissionId is provided (uploads bucket is private).
+  useEffect(() => {
+    if (!open) return;
 
-  const isImage = fileType?.startsWith('image') || 
-    currentUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i);
+    let cancelled = false;
+    const run = async () => {
+      setError(false);
+      setLoading(true);
+
+      // If we don't have a submissionId, just use the raw refs (public URLs / legacy behavior).
+      if (!submissionId) {
+        setResolvedUrls([]);
+        return;
+      }
+
+      const { data, error: fnError } = await supabase.functions.invoke('resolve-submission-files', {
+        body: { submission_id: submissionId },
+      });
+
+      if (cancelled) return;
+
+      if (fnError || !data?.success || !Array.isArray(data?.signed_urls) || data.signed_urls.length === 0) {
+        // Fall back to raw refs; still allows preview for older rows that stored public URLs.
+        console.error('Failed to resolve submission files:', fnError || data);
+        setResolvedUrls([]);
+        setLoading(false);
+        return;
+      }
+
+      setResolvedUrls(data.signed_urls);
+      setCurrentPage(0);
+      setLoading(true);
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, submissionId]);
+
+  const isImage = !!currentUrl && (
+    fileType?.startsWith('image') ||
+    !!currentUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i)
+  );
 
   const handleLoad = () => {
     setLoading(false);
@@ -59,6 +108,15 @@ const FilePreviewDialog = ({
   };
 
   const getPreviewContent = () => {
+    if (!currentUrl) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+          <AlertCircle className="w-12 h-12 mb-4" />
+          <p className="text-lg font-medium">No file to preview</p>
+        </div>
+      );
+    }
+
     if (error) {
       return (
         <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
@@ -113,11 +171,14 @@ const FilePreviewDialog = ({
   };
 
   return (
+    // Keep hooks unconditional; only skip rendering when closed.
+    !open ? null :
     <Dialog open={open} onOpenChange={(isOpen) => {
       if (!isOpen) {
         setCurrentPage(0);
         setLoading(true);
         setError(false);
+        setResolvedUrls([]);
       }
       onOpenChange(isOpen);
     }}>

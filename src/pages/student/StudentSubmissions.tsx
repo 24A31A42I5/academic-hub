@@ -122,10 +122,29 @@ const StudentSubmissions = () => {
     toast.info('Starting verification...', { duration: 2000 });
 
     try {
+      // Resolve stable storage paths to signed URLs if needed (uploads bucket is private).
+      const refs = (submission.file_urls && submission.file_urls.length > 0)
+        ? submission.file_urls
+        : [submission.file_url];
+
+      const needsSigning = refs.some(r => r && !r.startsWith('http'));
+      let verificationUrls = refs as string[];
+
+      if (needsSigning) {
+        const { data: signedData, error: signedError } = await supabase.storage
+          .from('uploads')
+          .createSignedUrls(refs, 60 * 60);
+
+        if (signedError) throw signedError;
+        verificationUrls = (signedData || [])
+          .map((s: any) => s?.signedUrl)
+          .filter((u: any): u is string => typeof u === 'string' && u.length > 0);
+      }
+
       const { data, error } = await supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submission.id,
-          file_url: submission.file_url,
+          file_urls: verificationUrls,
           file_type: submission.file_type,
           student_profile_id: profile?.id,
         },
@@ -559,6 +578,7 @@ const StudentSubmissions = () => {
       <FilePreviewDialog
         open={!!previewSubmission}
         onOpenChange={() => setPreviewSubmission(null)}
+        submissionId={previewSubmission?.id || null}
         fileUrl={previewSubmission?.file_url || null}
         fileUrls={previewSubmission?.file_urls}
         fileType={previewSubmission?.file_type || null}

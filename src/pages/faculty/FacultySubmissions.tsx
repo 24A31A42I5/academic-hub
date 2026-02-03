@@ -768,6 +768,7 @@ const FacultySubmissions = () => {
       <FilePreviewDialog
         open={!!previewSubmission}
         onOpenChange={() => setPreviewSubmission(null)}
+        submissionId={previewSubmission?.id || null}
         fileUrl={previewSubmission?.file_url || null}
         fileUrls={previewSubmission?.file_urls}
         fileType={previewSubmission?.file_type || null}
