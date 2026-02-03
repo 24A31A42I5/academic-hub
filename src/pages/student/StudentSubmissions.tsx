@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { VerificationDetailsDialog } from '@/components/submission/VerificationDetailsDialog';
-import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload, Eye } from 'lucide-react';
+import FilePreviewDialog from '@/components/faculty/FilePreviewDialog';
+import { Loader2, FileText, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -66,6 +67,11 @@ const StudentSubmissions = () => {
   const [verifyingIds, setVerifyingIds] = useState<Set<string>>(new Set());
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
+  const [previewSubmission, setPreviewSubmission] = useState<Submission | null>(null);
+
+  const handleViewSubmissionFiles = (submission: Submission) => {
+    setPreviewSubmission(submission);
+  };
 
   const fetchSubmissions = useCallback(async () => {
     if (!profile) return;
@@ -289,11 +295,11 @@ const StudentSubmissions = () => {
             <TooltipTrigger>
               <Badge className="bg-green-500/10 text-green-600 gap-1">
                 <CheckCircle className="w-3 h-3" />
-                Verified
+                Verified ({submission.ai_similarity_score}%)
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Handwriting matches your reference sample</p>
+              <p>Score ≥ 70%: Handwriting verified successfully</p>
             </TooltipContent>
           </Tooltip>
         );
@@ -303,11 +309,11 @@ const StudentSubmissions = () => {
             <TooltipTrigger>
               <Badge className="bg-yellow-500/10 text-yellow-600 gap-1">
                 <AlertTriangle className="w-3 h-3" />
-                Manual Review
+                Manual Review ({submission.ai_similarity_score}%)
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Score 50–79: faculty manual review required</p>
+              <p>Score 50–69%: Faculty manual review required. You can resubmit.</p>
             </TooltipContent>
           </Tooltip>
         );
@@ -316,12 +322,12 @@ const StudentSubmissions = () => {
           <Tooltip>
             <TooltipTrigger>
               <Badge variant="destructive" className="gap-1">
-                <AlertTriangle className="w-3 h-3" />
-                Reupload Required
+                <XCircle className="w-3 h-3" />
+                Not Same Handwriting ({submission.ai_similarity_score}%)
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Score &lt; 50: please reupload a clearer handwritten submission</p>
+              <p>Score &lt; 50%: Handwriting doesn't match. Please resubmit with your own handwriting.</p>
             </TooltipContent>
           </Tooltip>
         );
@@ -493,31 +499,37 @@ const StudentSubmissions = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {submission.ai_risk_level === 'high' && submission.status !== 'graded' && (
+                        {/* Reupload button for high risk OR medium risk submissions */}
+                        {(submission.ai_risk_level === 'high' || submission.ai_risk_level === 'medium') && submission.status !== 'graded' && (
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button 
                                 variant="outline" 
                                 size="sm"
                                 onClick={() => navigate(`/student/assignments/${submission.assignment?.id}`)}
-                                className="h-7 text-xs text-destructive border-destructive/50"
+                                className={`h-7 text-xs ${submission.ai_risk_level === 'high' ? 'text-destructive border-destructive/50' : 'text-yellow-600 border-yellow-500/50'}`}
                               >
                                 <Upload className="w-3 h-3 mr-1" />
-                                Reupload
+                                Resubmit
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              <p>Your submission requires a clearer handwritten file</p>
+                              <p>{submission.ai_risk_level === 'high' 
+                                ? 'Score < 50%: Please reupload a clearer handwritten file' 
+                                : 'Score 50-69%: You can resubmit for better verification'}</p>
                             </TooltipContent>
                           </Tooltip>
                         )}
-                        <Button variant="ghost" size="sm" asChild>
-                          <a href={submission.file_url} target="_blank" rel="noopener noreferrer" title={submission.file_urls && submission.file_urls.length > 1 ? `${submission.file_urls.length} pages` : 'View file'}>
-                            <ExternalLink className="w-4 h-4" />
-                            {submission.file_urls && submission.file_urls.length > 1 && (
-                              <span className="ml-1 text-xs">({submission.file_urls.length})</span>
-                            )}
-                          </a>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => handleViewSubmissionFiles(submission)}
+                          title={submission.file_urls && submission.file_urls.length > 1 ? `View ${submission.file_urls.length} pages` : 'View file'}
+                        >
+                          <Eye className="w-4 h-4" />
+                          {submission.file_urls && submission.file_urls.length > 1 && (
+                            <span className="ml-1 text-xs">({submission.file_urls.length})</span>
+                          )}
                         </Button>
                       </div>
                     </TableCell>
@@ -542,6 +554,17 @@ const StudentSubmissions = () => {
           }}
         />
       )}
+
+      {/* File Preview Dialog for viewing all pages */}
+      <FilePreviewDialog
+        open={!!previewSubmission}
+        onOpenChange={() => setPreviewSubmission(null)}
+        fileUrl={previewSubmission?.file_url || null}
+        fileUrls={previewSubmission?.file_urls}
+        fileType={previewSubmission?.file_type || null}
+        studentName={profile?.full_name}
+        assignmentTitle={previewSubmission?.assignment?.title}
+      />
     </DashboardLayout>
   );
 };

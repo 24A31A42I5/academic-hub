@@ -645,11 +645,17 @@ const FacultySubmissions = () => {
                         <TableCell className="text-right">
                           {!item.notSubmitted && (
                             <div className="flex justify-end gap-2">
-                              {item.file_url && canGradeSubmission(item as Submission) && (
-                                <Button variant="ghost" size="sm" asChild>
-                                  <a href={item.file_url} target="_blank" rel="noopener noreferrer">
-                                    <ExternalLink className="w-4 h-4" />
-                                  </a>
+                              {item.file_url && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  onClick={() => setPreviewSubmission(item as Submission)}
+                                  title={item.file_urls && item.file_urls.length > 1 ? `View ${item.file_urls.length} pages` : 'View file'}
+                                >
+                                  <Eye className="w-4 h-4" />
+                                  {item.file_urls && item.file_urls.length > 1 && (
+                                    <span className="ml-1 text-xs">({item.file_urls.length})</span>
+                                  )}
                                 </Button>
                               )}
                               {canGradeSubmission(item as Submission) ? (
@@ -706,13 +712,17 @@ const FacultySubmissions = () => {
                 )}
               </div>
               <div>
-                <Label>Marks</Label>
+                <Label>Marks (out of 5)</Label>
                 <Input
                   type="number"
+                  min="0"
+                  max="5"
+                  step="0.5"
                   value={gradeForm.marks}
                   onChange={(e) => setGradeForm({ ...gradeForm, marks: e.target.value })}
-                  placeholder="Enter marks"
+                  placeholder="Enter marks (0-5)"
                 />
+                <p className="text-xs text-muted-foreground mt-1">Maximum marks: 5</p>
               </div>
               <div>
                 <Label>Feedback</Label>

@@ -13,9 +13,9 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // ==================== CONFIGURATION ====================
 const VERIFICATION_THRESHOLDS = {
-  VERIFIED: 75,        // >= 75: Verified (same writer)
-  MANUAL_REVIEW: 50,   // 50-74: Manual Review required
-  REUPLOAD: 0          // < 50: Reupload Required
+  VERIFIED: 70,        // >= 70: Verified (same writer)
+  MANUAL_REVIEW: 50,   // 50-69: Manual Review required
+  REUPLOAD: 0          // < 50: Not Same Handwriting - Reupload Required
 };
 
 // Maximum base64 size to send to AI (5MB encoded = ~3.75MB file)
