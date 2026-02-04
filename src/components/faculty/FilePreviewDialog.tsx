@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -28,10 +28,30 @@ const FilePreviewDialog = ({
   const [error, setError] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
 
+  const fileUrlsKey = useMemo(() => (fileUrls && fileUrls.length ? fileUrls.join('|') : ''), [fileUrls]);
+
   // Use fileUrls if available, otherwise fall back to single fileUrl
-  const allUrls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
+  const allUrls = useMemo(
+    () => (fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : [])),
+    [fileUrlsKey, fileUrl]
+  );
   const totalPages = allUrls.length;
   const currentUrl = allUrls[currentPage] || null;
+
+  // Reset paging state whenever we open or switch the submission being previewed.
+  useEffect(() => {
+    if (!open) return;
+    setCurrentPage(0);
+    setLoading(true);
+    setError(false);
+  }, [open, fileUrl, fileUrlsKey]);
+
+  // Guard against stale page index if the URL list changes.
+  useEffect(() => {
+    if (currentPage > 0 && currentPage >= totalPages) {
+      setCurrentPage(0);
+    }
+  }, [currentPage, totalPages]);
 
   if (!currentUrl) return null;
 

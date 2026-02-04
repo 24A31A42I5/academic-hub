@@ -41,6 +41,29 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
     const [errorType, setErrorType] = useState<string | null>(null);
     const [pageResults, setPageResults] = useState<any[]>([]);
 
+    const applyBackendCompletionState = (row: any) => {
+      if (!row?.verified_at) return;
+
+      setStage('complete');
+      setIsComplete(true);
+      setStatus(row.status);
+      setScore(row.ai_similarity_score);
+      setRiskLevel(row.ai_risk_level);
+
+      if (row.page_verification_results) {
+        setPageResults(row.page_verification_results);
+      } else if (row.ai_analysis_details?.page_results) {
+        setPageResults(row.ai_analysis_details.page_results);
+      }
+
+      const analysisDetails = row.ai_analysis_details;
+      if (analysisDetails?.error_type) {
+        setErrorType(analysisDetails.error_type);
+      }
+
+      onComplete?.(row.status, row.ai_similarity_score);
+    };
+
     const getStageLabel = (): string => {
       switch (stage) {
         case 'uploading':
@@ -84,11 +107,26 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
     };
 
     useEffect(() => {
+      let cancelled = false;
+
       // Simulate initial stages with timing
       const stageTimers = [
         setTimeout(() => setStage('fetching'), 1500),
         setTimeout(() => setStage('analyzing'), 3000),
       ];
+
+      // If realtime is missed (e.g., verification completes very quickly), fetch once on mount.
+      (async () => {
+        const { data } = await supabase
+          .from('submissions')
+          .select('verified_at,status,ai_similarity_score,ai_risk_level,ai_analysis_details,page_verification_results')
+          .eq('id', submissionId)
+          .maybeSingle();
+
+        if (!cancelled) {
+          applyBackendCompletionState(data);
+        }
+      })();
 
       // Simulate page progression for multi-page submissions
       if (pageCount > 1) {
@@ -131,26 +169,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
             const newData = payload.new as any;
             
             if (newData.verified_at) {
-              setStage('complete');
-              setIsComplete(true);
-              setStatus(newData.status);
-              setScore(newData.ai_similarity_score);
-              setRiskLevel(newData.ai_risk_level);
-              
-              // Get page results if available
-              if (newData.page_verification_results) {
-                setPageResults(newData.page_verification_results);
-              } else if (newData.ai_analysis_details?.page_results) {
-                setPageResults(newData.ai_analysis_details.page_results);
-              }
-              
-              // Check for error types in analysis details
-              const analysisDetails = newData.ai_analysis_details;
-              if (analysisDetails?.error_type) {
-                setErrorType(analysisDetails.error_type);
-              }
-              
-              onComplete?.(newData.status, newData.ai_similarity_score);
+              applyBackendCompletionState(newData);
             } else if (newData.status === 'verifying') {
               setStage('analyzing');
             }
@@ -161,16 +180,28 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
       // Timeout fallback after 180 seconds (3 minutes for multi-page)
       // Only show timeout if verification hasn't completed via realtime
       const timeoutTimer = setTimeout(() => {
-        // Double-check current state before setting error
-        // The realtime subscription may have updated isComplete
-        if (!isComplete) {
-          // Don't show error, just set to complete - backend may still be processing
-          // and user can check submissions page
-          setStage('complete');
-        }
+        // UI-only sync: if realtime missed the completion event, fetch the current row
+        // before showing any "timeout"-like state.
+        if (isComplete) return;
+        supabase
+          .from('submissions')
+          .select('verified_at,status,ai_similarity_score,ai_risk_level,ai_analysis_details,page_verification_results')
+          .eq('id', submissionId)
+          .maybeSingle()
+          .then(({ data }) => {
+            if (data?.verified_at) {
+              applyBackendCompletionState(data);
+              return;
+            }
+
+            // Still processing: keep UI in a non-error state.
+            setError(null);
+            setStage('complete');
+          });
       }, 180000);
 
       return () => {
+        cancelled = true;
         stageTimers.forEach(clearTimeout);
         clearTimeout(timeoutTimer);
         supabase.removeChannel(channel);
