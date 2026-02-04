@@ -29,18 +29,17 @@ interface PageResult {
   confidence: string;
 }
 
-async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64: string; size: number }> {
-  console.log('Fetching image:', url);
+async function fetchImageAsBase64(urlOrPath: string, supabase: any): Promise<{ base64: string; size: number }> {
+  console.log('Fetching image:', urlOrPath);
   
-  // Check if this is a Supabase storage URL that needs a signed URL
-  const uploadsBucketMatch = url.match(/\/storage\/v1\/object\/public\/uploads\/(.+)$/);
-  if (uploadsBucketMatch) {
-    const filePath = uploadsBucketMatch[1];
-    console.log('Generating signed URL for private bucket, path:', filePath);
-    
+  let url = urlOrPath;
+  
+  // If it's a path (not starting with http), generate a signed URL
+  if (!urlOrPath.startsWith('http')) {
+    console.log('Generating signed URL for path:', urlOrPath);
     const { data: signedData, error: signedError } = await supabase.storage
       .from('uploads')
-      .createSignedUrl(filePath, 300); // 5 minute expiry
+      .createSignedUrl(urlOrPath, 300); // 5 minute expiry
     
     if (signedError) {
       console.error('Error creating signed URL:', signedError);
@@ -48,7 +47,26 @@ async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64:
     }
     
     url = signedData.signedUrl;
-    console.log('Using signed URL');
+    console.log('Using signed URL for path');
+  } else if (urlOrPath.includes('/storage/v1/object/public/uploads/')) {
+    // It's a public URL to a private bucket - extract path and sign it
+    const match = urlOrPath.match(/\/storage\/v1\/object\/public\/uploads\/(.+)/);
+    if (match) {
+      const filePath = match[1];
+      console.log('Generating signed URL for extracted path:', filePath);
+      
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from('uploads')
+        .createSignedUrl(filePath, 300);
+      
+      if (signedError) {
+        console.error('Error creating signed URL:', signedError);
+        throw new Error(`Failed to access file: ${signedError.message}`);
+      }
+      
+      url = signedData.signedUrl;
+      console.log('Using signed URL');
+    }
   }
   
   const response = await fetch(url);

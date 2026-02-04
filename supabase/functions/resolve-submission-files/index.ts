@@ -14,6 +14,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
     // Get authorization header to verify user
     const authHeader = req.headers.get('authorization');
@@ -28,13 +29,14 @@ Deno.serve(async (req) => {
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     // Create client with user token to verify access
-    const supabaseUser = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { authorization: authHeader } }
     });
 
     // Get user
     const { data: { user }, error: userError } = await supabaseUser.auth.getUser();
     if (userError || !user) {
+      console.error('Auth error:', userError);
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -50,14 +52,17 @@ Deno.serve(async (req) => {
       );
     }
 
+    console.log('Resolving files for submission:', submission_id, 'User:', user.id);
+
     // Get user's profile
-    const { data: profile } = await supabaseAdmin
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('id, role')
       .eq('user_id', user.id)
       .single();
 
-    if (!profile) {
+    if (profileError || !profile) {
+      console.error('Profile error:', profileError);
       return new Response(
         JSON.stringify({ error: 'Profile not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -98,6 +103,7 @@ Deno.serve(async (req) => {
     const isAdmin = profile.role === 'admin';
 
     if (!isStudent && !isFaculty && !isAdmin) {
+      console.error('Access denied for profile:', profile.id, 'role:', profile.role);
       return new Response(
         JSON.stringify({ error: 'Access denied' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -112,6 +118,8 @@ Deno.serve(async (req) => {
     } else if (submission.file_url) {
       filePaths = [submission.file_url];
     }
+
+    console.log('Raw file paths:', filePaths);
 
     // Convert URLs/paths to storage paths
     const storagePaths = filePaths.map((url: string) => {
@@ -129,29 +137,32 @@ Deno.serve(async (req) => {
       return parts.length > 1 ? parts[1] : url;
     });
 
-    console.log('Resolving storage paths:', storagePaths);
+    console.log('Storage paths to resolve:', storagePaths);
 
     // Generate signed URLs for each file
     const signedUrls: string[] = [];
     
     for (const path of storagePaths) {
-      const { data: signedData, error: signError } = await supabaseAdmin
-        .storage
-        .from('uploads')
-        .createSignedUrl(path, 3600); // 1 hour expiry
+      try {
+        const { data: signedData, error: signError } = await supabaseAdmin
+          .storage
+          .from('uploads')
+          .createSignedUrl(path, 3600); // 1 hour expiry
 
-      if (signError) {
-        console.error(`Error creating signed URL for ${path}:`, signError);
-        // Try with the original path in case it was malformed
-        continue;
-      }
+        if (signError) {
+          console.error(`Error creating signed URL for ${path}:`, signError);
+          continue;
+        }
 
-      if (signedData?.signedUrl) {
-        signedUrls.push(signedData.signedUrl);
+        if (signedData?.signedUrl) {
+          signedUrls.push(signedData.signedUrl);
+        }
+      } catch (urlError) {
+        console.error(`Exception creating signed URL for ${path}:`, urlError);
       }
     }
 
-    console.log(`Generated ${signedUrls.length} signed URLs`);
+    console.log(`Generated ${signedUrls.length} signed URLs out of ${storagePaths.length} paths`);
 
     return new Response(
       JSON.stringify({ 

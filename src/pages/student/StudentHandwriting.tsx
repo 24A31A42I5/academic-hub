@@ -259,9 +259,16 @@ const StudentHandwriting = () => {
 
     setRetraining(true);
     try {
+      // Use cache-busted URL to ensure we're training on the LATEST image
+      // Strip any existing query params and add fresh timestamp
+      const baseUrl = studentDetails.handwriting_url.split('?')[0];
+      const freshImageUrl = `${baseUrl}?t=${Date.now()}`;
+      
+      console.log('Retraining with fresh URL:', freshImageUrl);
+      
       const { data, error } = await supabase.functions.invoke('extract-handwriting-features', {
         body: {
-          image_url: studentDetails.handwriting_url,
+          image_url: freshImageUrl,
           student_details_id: studentDetails.id,
         },
       });
@@ -269,8 +276,8 @@ const StudentHandwriting = () => {
       if (error) throw error;
 
       if (data?.success) {
-        toast.success('Features re-extracted successfully!');
-        // Refresh student details
+        toast.success('Handwriting model trained successfully!');
+        // Refresh student details to get updated embedding timestamp
         const { data: updatedDetails } = await supabase
           .from('student_details')
           .select('*')
@@ -282,7 +289,7 @@ const StudentHandwriting = () => {
       }
     } catch (error: any) {
       console.error('Retrain error:', error);
-      toast.error('Failed to re-extract features');
+      toast.error('Failed to train handwriting model');
     } finally {
       setRetraining(false);
     }
