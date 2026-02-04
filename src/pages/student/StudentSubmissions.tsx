@@ -557,6 +557,7 @@ const StudentSubmissions = () => {
         fileType={previewSubmission?.file_type || null}
         studentName={profile?.full_name}
         assignmentTitle={previewSubmission?.assignment?.title}
+        submissionId={previewSubmission?.id}
       />
     </DashboardLayout>
   );

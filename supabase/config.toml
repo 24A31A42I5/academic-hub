@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.deadline-reminder]
 verify_jwt = false
+
+[functions.resolve-submission-files]
+verify_jwt = false
