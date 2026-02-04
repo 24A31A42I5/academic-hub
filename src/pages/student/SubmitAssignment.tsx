@@ -192,39 +192,36 @@ const SubmitAssignment = () => {
 
     setUploading(true);
     try {
-      const uploadedUrls: string[] = [];
+      const uploadedPaths: string[] = [];
       const timestamp = Date.now();
 
       // Upload all images in order
       for (let i = 0; i < selectedImages.length; i++) {
         const img = selectedImages[i];
         const ext = img.file.name.split('.').pop() || 'jpg';
-        const fileName = `${user.id}/${assignment.id}/page_${i + 1}_${timestamp}.${ext}`;
+        // Store just the path, not the full URL (bucket is private)
+        const filePath = `${user.id}/${assignment.id}/page_${i + 1}_${timestamp}.${ext}`;
 
         const { error: uploadError } = await supabase.storage
           .from('uploads')
-          .upload(fileName, img.file, {
+          .upload(filePath, img.file, {
             cacheControl: '3600',
             upsert: true,
           });
 
         if (uploadError) throw uploadError;
 
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('uploads')
-          .getPublicUrl(fileName);
-
-        uploadedUrls.push(publicUrl);
+        // Store the file path, not the public URL (since bucket is private)
+        uploadedPaths.push(filePath);
       }
 
       // Check if deadline passed
       const isLate = isPast(new Date(assignment.deadline));
 
-      // Base submission data
+      // Base submission data - store file paths (not public URLs for private bucket)
       const baseSubmission = {
-        file_url: uploadedUrls[0], // First image for backward compatibility
-        file_urls: uploadedUrls,
+        file_url: uploadedPaths[0], // First path for backward compatibility
+        file_urls: uploadedPaths,   // All paths
         file_type: 'image/jpeg', // All submissions are now images
         submitted_at: new Date().toISOString(),
         is_late: isLate,
@@ -267,16 +264,17 @@ const SubmitAssignment = () => {
       // Show verification progress
       setVerifyingSubmissionId(submissionId);
       setShowProgress(true);
-      toast.success(`${uploadedUrls.length} page(s) submitted! AI verification started.`);
+      toast.success(`${uploadedPaths.length} page(s) submitted! AI verification started.`);
       
-      // Trigger AI handwriting verification with all image URLs
+      // Trigger AI handwriting verification with file paths
+      // The edge function will generate signed URLs internally
       supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submissionId,
-          file_urls: uploadedUrls,
+          file_urls: uploadedPaths, // Pass paths, edge function handles signed URLs
           file_type: 'image/jpeg',
           student_profile_id: profile.id,
-          page_count: uploadedUrls.length,
+          page_count: uploadedPaths.length,
         },
       }).then(({ error }) => {
         if (error) {
