@@ -27,7 +27,7 @@ The quick brown fox jumps over the lazy dog.
 Pack my box with five dozen liquor jugs.`;
 
 const StudentHandwriting = () => {
-  const { profile, user, loading: authLoading } = useAuth();
+  const { profile, user, session, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [studentDetails, setStudentDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -40,6 +40,10 @@ const StudentHandwriting = () => {
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // CRITICAL: Capture current user and profile IDs for strict isolation
+  const currentUserId = user?.id;
+  const currentProfileId = profile?.id;
+
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'student')) {
       navigate('/auth');
@@ -48,13 +52,15 @@ const StudentHandwriting = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!profile) return;
+      // CRITICAL: Always require current profile ID for data isolation
+      if (!profile || !currentProfileId) return;
 
       try {
+        // STRICTLY fetch only current student's details
         const { data: details } = await supabase
           .from('student_details')
           .select('*')
-          .eq('profile_id', profile.id)
+          .eq('profile_id', currentProfileId)
           .maybeSingle();
 
         setStudentDetails(details);
@@ -68,7 +74,7 @@ const StudentHandwriting = () => {
     if (profile?.role === 'student') {
       fetchData();
     }
-  }, [profile]);
+  }, [profile, currentProfileId]);
 
   const copyToClipboard = async () => {
     try {
@@ -138,7 +144,18 @@ const StudentHandwriting = () => {
   };
 
   const handleUpload = async () => {
-    if (!selectedFile || !user || !studentDetails) return;
+    // CRITICAL: Verify current user identity before any upload
+    if (!selectedFile || !user || !studentDetails || !currentUserId || !currentProfileId) {
+      toast.error('Please ensure you are logged in before uploading.');
+      return;
+    }
+
+    // CRITICAL: Verify studentDetails belongs to current user
+    if (studentDetails.profile_id !== currentProfileId) {
+      console.error('Student details mismatch - aborting upload for security');
+      toast.error('Session error. Please refresh the page and try again.');
+      return;
+    }
 
     setUploading(true);
     try {
@@ -152,7 +169,8 @@ const StudentHandwriting = () => {
         .eq('handwriting_image_hash', imageHash)
         .maybeSingle();
       
-      if (existingHash && existingHash.profile_id !== profile?.id) {
+      // CRITICAL: Use verified currentProfileId for comparison
+      if (existingHash && existingHash.profile_id !== currentProfileId) {
         toast.error('This image has already been used by another student. Please upload your own handwriting sample.');
         setUploading(false);
         return;
@@ -161,8 +179,8 @@ const StudentHandwriting = () => {
       // Strip EXIF data
       const strippedImage = await stripExifData(selectedFile);
       
-      // Upload to storage
-      const fileName = `${user.id}/handwriting.jpg`;
+      // Upload to storage - CRITICAL: Use current user's ID for path isolation
+      const fileName = `${currentUserId}/handwriting.jpg`;
 
       // Use upsert: true to allow re-upload when admin has deleted the old sample
       const { error: uploadError } = await supabase.storage
@@ -252,8 +270,16 @@ const StudentHandwriting = () => {
 
   // Retrain/re-extract features from existing handwriting sample
   const handleRetrainFeatures = async () => {
-    if (!studentDetails?.handwriting_url || !studentDetails?.id) {
+    // CRITICAL: Verify ownership before retraining
+    if (!studentDetails?.handwriting_url || !studentDetails?.id || !currentProfileId) {
       toast.error('No handwriting sample found');
+      return;
+    }
+
+    // CRITICAL: Double-check that studentDetails belongs to current user
+    if (studentDetails.profile_id !== currentProfileId) {
+      console.error('Student details mismatch - aborting retrain for security');
+      toast.error('Session error. Please refresh the page and try again.');
       return;
     }
 
@@ -264,7 +290,7 @@ const StudentHandwriting = () => {
       const baseUrl = studentDetails.handwriting_url.split('?')[0];
       const freshImageUrl = `${baseUrl}?t=${Date.now()}`;
       
-      console.log('Retraining with fresh URL:', freshImageUrl);
+      console.log('Retraining with fresh URL for student:', currentProfileId);
       
       const { data, error } = await supabase.functions.invoke('extract-handwriting-features', {
         body: {
@@ -277,11 +303,12 @@ const StudentHandwriting = () => {
 
       if (data?.success) {
         toast.success('Handwriting model trained successfully!');
-        // Refresh student details to get updated embedding timestamp
+        // Refresh student details to get updated embedding timestamp - STRICTLY for current student
         const { data: updatedDetails } = await supabase
           .from('student_details')
           .select('*')
           .eq('id', studentDetails.id)
+          .eq('profile_id', currentProfileId)
           .single();
         setStudentDetails(updatedDetails);
       } else {
@@ -461,7 +488,7 @@ const StudentHandwriting = () => {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/jpg,image/webp"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                     onChange={handleFileSelect}
                     className="hidden"
                     id="handwriting-upload"

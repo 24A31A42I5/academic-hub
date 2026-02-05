@@ -52,11 +52,15 @@ interface Submission {
 }
 
 const StudentSubmissions = () => {
-  const { profile, loading: authLoading } = useAuth();
+  const { profile, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [studentDetails, setStudentDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // CRITICAL: Capture current profile ID for strict data isolation
+  const currentProfileId = profile?.id;
+  const currentUserId = user?.id;
 
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'student')) {
@@ -70,8 +74,10 @@ const StudentSubmissions = () => {
   const [previewSubmission, setPreviewSubmission] = useState<Submission | null>(null);
 
   const fetchSubmissions = useCallback(async () => {
-    if (!profile) return;
+    // CRITICAL: Always require current profile ID for data isolation
+    if (!profile || !currentProfileId) return;
     
+    // STRICTLY fetch only current student's submissions
     const { data, error } = await supabase
       .from('submissions')
       .select(`
@@ -99,13 +105,13 @@ const StudentSubmissions = () => {
           deadline
         )
       `)
-      .eq('student_profile_id', profile.id)
+      .eq('student_profile_id', currentProfileId)
       .order('submitted_at', { ascending: false });
 
     if (!error && data) {
       setSubmissions(data as unknown as Submission[]);
     }
-  }, [profile]);
+  }, [profile, currentProfileId]);
 
   const handleViewDetails = (submission: Submission) => {
     setSelectedSubmission(submission);
@@ -114,6 +120,12 @@ const StudentSubmissions = () => {
 
   // Manual verify function for stuck submissions
   const handleManualVerify = async (submission: Submission) => {
+    // CRITICAL: Verify submission belongs to current student
+    if (!currentProfileId || submission.id === undefined) {
+      toast.error('Cannot verify: session error');
+      return;
+    }
+
     setVerifyingIds(prev => new Set(prev).add(submission.id));
     toast.info('Starting verification...', { duration: 2000 });
 
@@ -123,7 +135,7 @@ const StudentSubmissions = () => {
           submission_id: submission.id,
           file_url: submission.file_url,
           file_type: submission.file_type,
-          student_profile_id: profile?.id,
+          student_profile_id: currentProfileId, // CRITICAL: Use verified profile ID
         },
       });
 
@@ -161,13 +173,15 @@ const StudentSubmissions = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!profile) return;
+      // CRITICAL: Always require current profile ID for data isolation
+      if (!profile || !currentProfileId) return;
 
       try {
+        // STRICTLY fetch only current student's details
         const { data: detailsRes } = await supabase
           .from('student_details')
           .select('*')
-          .eq('profile_id', profile.id)
+          .eq('profile_id', currentProfileId)
           .maybeSingle();
 
         setStudentDetails(detailsRes);
@@ -186,17 +200,18 @@ const StudentSubmissions = () => {
 
   // Real-time subscription for verification status updates
   useEffect(() => {
-    if (!profile) return;
+    // CRITICAL: Only subscribe to current student's updates
+    if (!profile || !currentProfileId) return;
 
     const channel = supabase
-      .channel('submission-updates')
+      .channel(`submission-updates-${currentProfileId}`) // Namespaced channel per student
       .on(
         'postgres_changes',
         {
           event: 'UPDATE',
           schema: 'public',
           table: 'submissions',
-          filter: `student_profile_id=eq.${profile.id}`,
+          filter: `student_profile_id=eq.${currentProfileId}`,
         },
         (payload) => {
           console.log('Submission updated:', payload);
@@ -241,7 +256,7 @@ const StudentSubmissions = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile]);
+  }, [profile, currentProfileId]);
 
   const getVerificationBadge = (submission: Submission) => {
     const hasVerificationResult = !!submission.verified_at;
