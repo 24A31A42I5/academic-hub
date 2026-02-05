@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { useCallback } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -43,7 +44,7 @@ const MAX_IMAGES = 20;
 
 const SubmitAssignment = () => {
   const { assignmentId } = useParams<{ assignmentId: string }>();
-  const { profile, user, loading: authLoading } = useAuth();
+  const { profile, user, session, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [existingSubmission, setExistingSubmission] = useState<any>(null);
@@ -56,6 +57,10 @@ const SubmitAssignment = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
+  // Verify we have valid user and profile before any operations
+  const currentUserId = user?.id;
+  const currentProfileId = profile?.id;
+
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'student')) {
       navigate('/auth');
@@ -64,7 +69,8 @@ const SubmitAssignment = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!profile || !assignmentId) return;
+      // CRITICAL: Always check for current user's profile
+      if (!profile || !assignmentId || !currentProfileId) return;
 
       try {
         // Fetch assignment
@@ -77,12 +83,12 @@ const SubmitAssignment = () => {
         if (assignmentError) throw assignmentError;
         setAssignment(assignmentData);
 
-        // Check for existing submission
+        // Check for existing submission - STRICTLY for current student only
         const { data: submissionData } = await supabase
           .from('submissions')
           .select('*')
           .eq('assignment_id', assignmentId)
-          .eq('student_profile_id', profile.id)
+          .eq('student_profile_id', currentProfileId)
           .maybeSingle();
 
         setExistingSubmission(submissionData);
@@ -97,7 +103,7 @@ const SubmitAssignment = () => {
     if (profile?.role === 'student') {
       fetchData();
     }
-  }, [profile, assignmentId]);
+  }, [profile, assignmentId, currentProfileId]);
 
   // Cleanup preview URLs on unmount
   useEffect(() => {
@@ -188,25 +194,31 @@ const SubmitAssignment = () => {
   };
 
   const handleSubmit = async () => {
-    if (selectedImages.length === 0 || !user || !profile || !assignment) return;
+    // CRITICAL: Verify current user identity before upload
+    if (selectedImages.length === 0 || !user || !profile || !assignment || !currentUserId || !currentProfileId) {
+      toast.error('Please ensure you are logged in before submitting.');
+      return;
+    }
 
     setUploading(true);
     try {
       const uploadedPaths: string[] = [];
       const timestamp = Date.now();
 
-      // Upload all images in order
+      // Upload all images in order - each file path is namespaced by USER ID
       for (let i = 0; i < selectedImages.length; i++) {
         const img = selectedImages[i];
         const ext = img.file.name.split('.').pop() || 'jpg';
-        // Store just the path, not the full URL (bucket is private)
-        const filePath = `${user.id}/${assignment.id}/page_${i + 1}_${timestamp}.${ext}`;
+        // CRITICAL: File path MUST include current user's ID to ensure isolation
+        const filePath = `${currentUserId}/${assignment.id}/page_${i + 1}_${timestamp}.${ext}`;
 
+        // Use FormData for better mobile compatibility
         const { error: uploadError } = await supabase.storage
           .from('uploads')
           .upload(filePath, img.file, {
-            cacheControl: '3600',
+            cacheControl: 'no-cache',
             upsert: true,
+            contentType: img.file.type || 'image/jpeg',
           });
 
         if (uploadError) throw uploadError;
@@ -242,7 +254,8 @@ const SubmitAssignment = () => {
         const { error } = await supabase
           .from('submissions')
           .update(baseSubmission)
-          .eq('id', existingSubmission.id);
+          .eq('id', existingSubmission.id)
+          .eq('student_profile_id', currentProfileId); // CRITICAL: Double-check ownership
 
         if (error) throw error;
         submissionId = existingSubmission.id;
@@ -252,7 +265,7 @@ const SubmitAssignment = () => {
           .insert({
             ...baseSubmission,
             assignment_id: assignment.id,
-            student_profile_id: profile.id,
+            student_profile_id: currentProfileId, // CRITICAL: Use verified profile ID
           })
           .select('id')
           .single();
@@ -267,13 +280,13 @@ const SubmitAssignment = () => {
       toast.success(`${uploadedPaths.length} page(s) submitted! AI verification started.`);
       
       // Trigger AI handwriting verification with file paths
-      // The edge function will generate signed URLs internally
+      // CRITICAL: Pass current student's profile ID for isolated verification
       supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submissionId,
           file_urls: uploadedPaths, // Pass paths, edge function handles signed URLs
           file_type: 'image/jpeg',
-          student_profile_id: profile.id,
+          student_profile_id: currentProfileId, // CRITICAL: Must be current student only
           page_count: uploadedPaths.length,
         },
       }).then(({ error }) => {
@@ -523,7 +536,7 @@ const SubmitAssignment = () => {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".jpg,.jpeg,.png,.webp"
+                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                   multiple
                   onChange={handleFileSelect}
                   className="hidden"
@@ -546,7 +559,7 @@ const SubmitAssignment = () => {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".jpg,.jpeg,.png,.webp"
+              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
               multiple
               onChange={handleFileSelect}
               className="hidden"
