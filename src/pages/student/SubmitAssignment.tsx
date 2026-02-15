@@ -332,13 +332,17 @@ const SubmitAssignment = () => {
 
       // Create or update submission
       if (existingSubmission) {
-        const { error } = await supabase
+        const { data: updatedRows, error } = await supabase
           .from('submissions')
           .update(baseSubmission)
           .eq('id', existingSubmission.id)
-          .eq('student_profile_id', currentProfileId); // CRITICAL: Double-check ownership
+          .eq('student_profile_id', currentProfileId)
+          .select('id');
 
         if (error) throw error;
+        if (!updatedRows || updatedRows.length === 0) {
+          throw new Error('Failed to update submission. It may have already been graded.');
+        }
         submissionId = existingSubmission.id;
       } else {
         const { data: newSubmission, error } = await supabase
