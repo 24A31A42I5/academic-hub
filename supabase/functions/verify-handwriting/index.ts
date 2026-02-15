@@ -335,7 +335,7 @@ serve(async (req) => {
     // CRITICAL: Get student's trained handwriting profile - STRICTLY for this student
     const { data: studentDetails, error: studentError } = await supabase
       .from('student_details')
-      .select('handwriting_feature_embedding, handwriting_url, roll_number')
+      .select('handwriting_feature_embedding, handwriting_url, roll_number, handwriting_features_extracted_at')
       .eq('profile_id', student_profile_id)
       .single();
 
@@ -396,9 +396,14 @@ serve(async (req) => {
       throw new Error('Access denied: submission does not belong to this student');
     }
 
-    // Fetch reference image (handwriting sample is in public bucket, so no path validation needed)
-    console.log('Fetching reference handwriting sample...');
-    const { base64: referenceBase64, size: refSize } = await fetchImageAsBase64(referenceImageUrl, supabase);
+    // Fetch reference image with cache-busting to ensure we get the LATEST trained sample
+    // The CDN caches public URLs, so appending the extraction timestamp forces a fresh fetch
+    const cacheBuster = studentDetails.handwriting_features_extracted_at
+      ? `?t=${new Date(studentDetails.handwriting_features_extracted_at).getTime()}`
+      : `?t=${Date.now()}`;
+    const cacheBustedReferenceUrl = `${referenceImageUrl}${cacheBuster}`;
+    console.log('Fetching reference handwriting sample with cache buster:', cacheBuster);
+    const { base64: referenceBase64, size: refSize } = await fetchImageAsBase64(cacheBustedReferenceUrl, supabase);
     console.log('Reference image size:', refSize, 'bytes');
 
     // Process each page

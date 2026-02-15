@@ -42,6 +42,45 @@ const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per image
 const MAX_IMAGES = 20;
 
+/**
+ * Normalize an image file to a JPEG Blob via canvas.
+ * This fixes mobile gallery uploads where file.type can be empty/unreliable
+ * and the raw File object may fail to upload on some mobile browsers.
+ */
+const normalizeImageFile = (file: File): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const imgEl = new window.Image();
+    imgEl.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = imgEl.naturalWidth;
+        canvas.height = imgEl.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+        ctx.drawImage(imgEl, 0, 0);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Canvas toBlob returned null'));
+            }
+          },
+          'image/jpeg',
+          0.92
+        );
+      } catch (e) {
+        reject(e);
+      }
+    };
+    imgEl.onerror = () => reject(new Error('Failed to load image for normalization'));
+    imgEl.src = URL.createObjectURL(file);
+  });
+};
+
 const SubmitAssignment = () => {
   const { assignmentId } = useParams<{ assignmentId: string }>();
   const { profile, user, session, loading: authLoading } = useAuth();
@@ -208,17 +247,29 @@ const SubmitAssignment = () => {
       // Upload all images in order - each file path is namespaced by USER ID
       for (let i = 0; i < selectedImages.length; i++) {
         const img = selectedImages[i];
-        const ext = img.file.name.split('.').pop() || 'jpg';
         // CRITICAL: File path MUST include current user's ID to ensure isolation
-        const filePath = `${currentUserId}/${assignment.id}/page_${i + 1}_${timestamp}.${ext}`;
+        // Always use .jpg since we normalize to JPEG
+        const filePath = `${currentUserId}/${assignment.id}/page_${i + 1}_${timestamp}.jpg`;
 
-        // Use FormData for better mobile compatibility
+        // Normalize image via canvas for mobile compatibility
+        // This converts any image to a reliable JPEG Blob, fixing:
+        // - Empty file.type on Android gallery picks
+        // - Unreliable MIME types on some mobile browsers
+        // - Raw File upload failures on certain devices
+        let uploadBlob: Blob;
+        try {
+          uploadBlob = await normalizeImageFile(img.file);
+        } catch (normErr) {
+          console.warn(`Image normalization failed for page ${i + 1}, using raw file:`, normErr);
+          uploadBlob = img.file;
+        }
+
         const { error: uploadError } = await supabase.storage
           .from('uploads')
-          .upload(filePath, img.file, {
+          .upload(filePath, uploadBlob, {
             cacheControl: 'no-cache',
             upsert: true,
-            contentType: img.file.type || 'image/jpeg',
+            contentType: 'image/jpeg',
           });
 
         if (uploadError) throw uploadError;
