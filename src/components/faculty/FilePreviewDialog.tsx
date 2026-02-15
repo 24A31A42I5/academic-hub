@@ -33,8 +33,8 @@ const FilePreviewDialog = ({
   const [resolvedUrls, setResolvedUrls] = useState<string[]>([]);
   const [resolvingUrls, setResolvingUrls] = useState(false);
 
-  // Resolve signed URLs when dialog opens
-  const resolveSignedUrls = useCallback(async () => {
+  // Resolve signed URLs when dialog opens, with retry for mobile reliability
+  const resolveSignedUrls = useCallback(async (retryCount = 0) => {
     if (!submissionId) {
       // If no submissionId, use the provided URLs directly (backwards compat)
       const urls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
@@ -50,22 +50,40 @@ const FilePreviewDialog = ({
 
       if (error) {
         console.error('Error resolving URLs:', error);
-        // Fallback to original URLs
+        // Retry once on failure (helps with mobile network issues)
+        if (retryCount < 1) {
+          console.log('Retrying signed URL resolution...');
+          setTimeout(() => resolveSignedUrls(retryCount + 1), 1500);
+          return;
+        }
+        // Fallback to original URLs after retry exhausted
         const urls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
         setResolvedUrls(urls);
       } else if (data?.signed_urls && data.signed_urls.length > 0) {
         setResolvedUrls(data.signed_urls);
       } else {
-        // Fallback to original URLs
+        // Retry once if empty result (mobile timing issue)
+        if (retryCount < 1) {
+          console.log('Empty result, retrying...');
+          setTimeout(() => resolveSignedUrls(retryCount + 1), 1500);
+          return;
+        }
         const urls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
         setResolvedUrls(urls);
       }
     } catch (err) {
       console.error('Failed to resolve signed URLs:', err);
+      if (retryCount < 1) {
+        console.log('Retrying after exception...');
+        setTimeout(() => resolveSignedUrls(retryCount + 1), 1500);
+        return;
+      }
       const urls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
       setResolvedUrls(urls);
     } finally {
-      setResolvingUrls(false);
+      if (retryCount >= 1 || !submissionId) {
+        setResolvingUrls(false);
+      }
     }
   }, [submissionId, fileUrls, fileUrl]);
 
