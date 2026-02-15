@@ -30,6 +30,11 @@ interface StageInfo {
   progress: number;
 }
 
+/**
+ * Represents the verification result for a single page of a submission
+ * @property same_writer - Whether the page was written by the same author as the reference
+ * @property confidence - Confidence score as a percentage (0-100)
+ */
 interface PageResult {
   same_writer: boolean;
   confidence: number;

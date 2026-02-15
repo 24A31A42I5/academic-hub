@@ -74,12 +74,15 @@ interface Assignment {
   title: string;
 }
 
+type StudentProfile = Database['public']['Tables']['profiles']['Row'] & { student_details?: Database['public']['Tables']['student_details']['Row'][] };
+type DisplayItem = Submission | (StudentProfile & { assignment: Assignment; notSubmitted: boolean });
+
 const FacultySubmissions = () => {
   const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [allStudents, setAllStudents] = useState<Array<Database['public']['Tables']['profiles']['Row'] & { student_details?: Database['public']['Tables']['student_details']['Row'][] }>>([]);
+  const [allStudents, setAllStudents] = useState<StudentProfile[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -317,7 +320,7 @@ const FacultySubmissions = () => {
     return submissions;
   };
 
-  const filteredData = getDisplayData().filter((item: Submission | (typeof allStudents[number] & { assignment: Assignment; notSubmitted: boolean })) => {
+  const filteredData = getDisplayData().filter((item: DisplayItem) => {
     const sub = item as Submission;
     const details = item.notSubmitted 
       ? (item.student_profile?.student_details?.[0] || item.student_profile?.student_details)
@@ -608,7 +611,7 @@ const FacultySubmissions = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredData.map((item: Submission | (typeof allStudents[number] & { assignment: Assignment; notSubmitted: boolean })) => {
+                  filteredData.map((item: DisplayItem) => {
                     const details = item.notSubmitted 
                       ? (item.student_profile?.student_details?.[0] || item.student_profile?.student_details)
                       : getStudentDetails(item as Submission);
