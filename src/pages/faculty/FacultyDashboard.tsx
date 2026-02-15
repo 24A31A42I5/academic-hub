@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -34,7 +35,7 @@ const FacultyDashboard = () => {
     flaggedSubmissions: 0, 
     sectionsAssigned: 0 
   });
-  const [recentAssignments, setRecentAssignments] = useState<any[]>([]);
+  const [recentAssignments, setRecentAssignments] = useState<Array<Database['public']['Tables']['assignments']['Row'] & { submissions?: Database['public']['Tables']['submissions']['Row'][] }>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -66,7 +67,7 @@ const FacultyDashboard = () => {
         let flaggedSubmissions = 0;
 
         assignments?.forEach(assignment => {
-          assignment.submissions?.forEach((sub: any) => {
+          assignment.submissions?.forEach((sub: Database['public']['Tables']['submissions']['Row']) => {
             if (sub.status === 'pending') pendingReviews++;
             if (['high', 'medium'].includes(sub.ai_risk_level)) flaggedSubmissions++;
           });
@@ -160,7 +161,7 @@ const FacultyDashboard = () => {
                 {recentAssignments.map((assignment) => {
                   const submissionCount = assignment.submissions?.length || 0;
                   const flaggedCount = assignment.submissions?.filter(
-                    (s: any) => ['high', 'medium'].includes(s.ai_risk_level)
+                    (s: Database['public']['Tables']['submissions']['Row']) => ['high', 'medium'].includes(s.ai_risk_level || '')
                   ).length || 0;
 
                   return (

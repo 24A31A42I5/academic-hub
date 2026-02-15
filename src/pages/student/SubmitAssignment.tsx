@@ -4,6 +4,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -109,7 +110,7 @@ const SubmitAssignment = () => {
   const { profile, user, session, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [assignment, setAssignment] = useState<Assignment | null>(null);
-  const [existingSubmission, setExistingSubmission] = useState<any>(null);
+  const [existingSubmission, setExistingSubmission] = useState<Database['public']['Tables']['submissions']['Row'] | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [selectedImages, setSelectedImages] = useState<SelectedImage[]>([]);
@@ -385,9 +386,9 @@ const SubmitAssignment = () => {
         console.error('Verification failed:', err);
         toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error submitting assignment:', error);
-      toast.error(error.message || 'Failed to submit assignment. Please try again.');
+      toast.error(error instanceof Error ? error.message : 'Failed to submit assignment. Please try again.');
     } finally {
       setUploading(false);
     }

@@ -1,4 +1,4 @@
-import { useEffect, useState, forwardRef } from 'react';
+import { useEffect, useState, forwardRef, useCallback } from 'react';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent } from '@/components/ui/card';
 import { supabase } from '@/integrations/supabase/client';
@@ -14,6 +14,7 @@ import {
   Image
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { Database } from '@/integrations/supabase/types';
 
 interface VerificationProgressProps {
   submissionId: string;
@@ -29,6 +30,13 @@ interface StageInfo {
   progress: number;
 }
 
+interface PageResult {
+  same_writer: boolean;
+  confidence: number;
+}
+
+type SubmissionRow = Database['public']['Tables']['submissions']['Row'];
+
 export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgressProps>(
   ({ submissionId, pageCount = 1, onComplete }, ref) => {
     const [stage, setStage] = useState<VerificationStage>('uploading');
@@ -39,9 +47,9 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
     const [isComplete, setIsComplete] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [errorType, setErrorType] = useState<string | null>(null);
-    const [pageResults, setPageResults] = useState<any[]>([]);
+    const [pageResults, setPageResults] = useState<PageResult[]>([]);
 
-    const applyBackendCompletionState = (row: any) => {
+    const applyBackendCompletionState = useCallback((row: SubmissionRow) => {
       if (!row?.verified_at) return;
 
       setStage('complete');
@@ -51,18 +59,19 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
       setRiskLevel(row.ai_risk_level);
 
       if (row.page_verification_results) {
-        setPageResults(row.page_verification_results);
-      } else if (row.ai_analysis_details?.page_results) {
-        setPageResults(row.ai_analysis_details.page_results);
+        setPageResults(row.page_verification_results as PageResult[]);
+      } else if (row.ai_analysis_details && typeof row.ai_analysis_details === 'object' && row.ai_analysis_details !== null && 'page_results' in row.ai_analysis_details) {
+        const details = row.ai_analysis_details as { page_results: PageResult[] };
+        setPageResults(details.page_results);
       }
 
-      const analysisDetails = row.ai_analysis_details;
-      if (analysisDetails?.error_type) {
+      const analysisDetails = row.ai_analysis_details as Record<string, unknown> | null;
+      if (analysisDetails && typeof analysisDetails.error_type === 'string') {
         setErrorType(analysisDetails.error_type);
       }
 
       onComplete?.(row.status, row.ai_similarity_score);
-    };
+    }, [onComplete]);
 
     const getStageLabel = (): string => {
       switch (stage) {
@@ -166,7 +175,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
             filter: `id=eq.${submissionId}`,
           },
           (payload) => {
-            const newData = payload.new as any;
+            const newData = payload.new as SubmissionRow;
             
             if (newData.verified_at) {
               applyBackendCompletionState(newData);
@@ -206,7 +215,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
         clearTimeout(timeoutTimer);
         supabase.removeChannel(channel);
       };
-    }, [submissionId, pageCount, onComplete, isComplete]);
+    }, [submissionId, pageCount, onComplete, isComplete, applyBackendCompletionState]);
 
     const StageIcon = stage === 'analyzing' ? Brain : 
                       stage === 'fetching' ? Eye :
@@ -320,7 +329,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
               <div className="pt-2 border-t border-border/50">
                 <p className="text-xs font-medium mb-2">Per-page scores:</p>
                 <div className="flex flex-wrap gap-1">
-                  {pageResults.map((result: any, idx: number) => (
+                  {pageResults.map((result: PageResult, idx: number) => (
                     <span
                       key={idx}
                       className={cn(

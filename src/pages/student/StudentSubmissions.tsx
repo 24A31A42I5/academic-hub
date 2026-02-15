@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,8 +40,8 @@ interface Submission {
   ai_risk_level: string | null;
   ai_similarity_score: number | null;
   ai_confidence_score: number | null;
-  ai_analysis_details: any;
-  page_verification_results: any[] | null;
+  ai_analysis_details: Database['public']['Tables']['submissions']['Row']['ai_analysis_details'];
+  page_verification_results: Database['public']['Tables']['submissions']['Row']['page_verification_results'];
   assignment: {
     id: string;
     title: string;
@@ -55,7 +56,7 @@ const StudentSubmissions = () => {
   const { profile, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [studentDetails, setStudentDetails] = useState<any>(null);
+  const [studentDetails, setStudentDetails] = useState<Database['public']['Tables']['student_details']['Row'] | null>(null);
   const [loading, setLoading] = useState(true);
 
   // CRITICAL: Capture current profile ID for strict data isolation
@@ -149,9 +150,9 @@ const StudentSubmissions = () => {
         toast.warning(data?.message || 'Verification completed with issues');
         await fetchSubmissions();
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Verification error:', error);
-      toast.error('Verification failed. Please try again later.');
+      toast.error(error instanceof Error ? error.message : 'Verification failed. Please try again later.');
     } finally {
       setVerifyingIds(prev => {
         const next = new Set(prev);
@@ -216,7 +217,7 @@ const StudentSubmissions = () => {
         },
         (payload) => {
           console.log('Submission updated:', payload);
-          const updated = payload.new as any;
+          const updated = payload.new as Database['public']['Tables']['submissions']['Row'];
           
           // Update the local state with the new data
           setSubmissions(prev => 

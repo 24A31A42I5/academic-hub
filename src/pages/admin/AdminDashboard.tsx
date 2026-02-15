@@ -8,6 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Users, GraduationCap, BookOpen, AlertTriangle, TrendingUp } from 'lucide-react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { logger } from '@/lib/logger';
+import type { Database } from '@/integrations/supabase/types';
+
+type ProfileRow = Database['public']['Tables']['profiles']['Row'];
 
 const navItems = [
   { label: 'Overview', href: '/admin', icon: DashboardIcons.Home },
@@ -28,7 +31,7 @@ interface Stats {
 const AdminDashboard = () => {
   const { profile, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<Stats>({ totalStudents: 0, totalFaculty: 0, totalAssignments: 0, fraudAlerts: 0 });
-  const [recentStudents, setRecentStudents] = useState<any[]>([]);
+  const [recentStudents, setRecentStudents] = useState<ProfileRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

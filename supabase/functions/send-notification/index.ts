@@ -438,10 +438,10 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     throw new Error("Invalid notification type");
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error in send-notification function:", error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
       {
         status: 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },

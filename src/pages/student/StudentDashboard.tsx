@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -31,9 +32,9 @@ const StudentDashboard = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState<Stats>({ totalAssignments: 0, submitted: 0, pending: 0, overdue: 0 });
   const [verificationStats, setVerificationStats] = useState({ verified: 0, manualReview: 0, reuploadRequired: 0, verifying: 0 });
-  const [studentDetails, setStudentDetails] = useState<any>(null);
-  const [upcomingAssignments, setUpcomingAssignments] = useState<any[]>([]);
-  const [recentSubmissions, setRecentSubmissions] = useState<any[]>([]);
+  const [studentDetails, setStudentDetails] = useState<Database['public']['Tables']['student_details']['Row'] | null>(null);
+  const [upcomingAssignments, setUpcomingAssignments] = useState<Array<Database['public']['Tables']['assignments']['Row']>>([]);
+  const [recentSubmissions, setRecentSubmissions] = useState<Array<Database['public']['Tables']['submissions']['Row'] & { assignment?: Database['public']['Tables']['assignments']['Row'] }>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

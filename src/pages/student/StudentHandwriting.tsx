@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -29,7 +30,7 @@ Pack my box with five dozen liquor jugs.`;
 const StudentHandwriting = () => {
   const { profile, user, session, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const [studentDetails, setStudentDetails] = useState<any>(null);
+  const [studentDetails, setStudentDetails] = useState<Database['public']['Tables']['student_details']['Row'] | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [extractingFeatures, setExtractingFeatures] = useState(false);
@@ -248,9 +249,9 @@ const StudentHandwriting = () => {
       setShowConfirmDialog(false);
       setSelectedFile(null);
       setPreviewUrl(null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error uploading handwriting:', error);
-      toast.error(error.message || 'Failed to upload handwriting sample');
+      toast.error(error instanceof Error ? error.message : 'Failed to upload handwriting sample');
     } finally {
       setUploading(false);
       setExtractingFeatures(false);
@@ -315,9 +316,9 @@ const StudentHandwriting = () => {
       } else {
         toast.error(data?.error || 'Feature extraction failed');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Retrain error:', error);
-      toast.error('Failed to train handwriting model');
+      toast.error(error instanceof Error ? error.message : 'Failed to train handwriting model');
     } finally {
       setRetraining(false);
     }
