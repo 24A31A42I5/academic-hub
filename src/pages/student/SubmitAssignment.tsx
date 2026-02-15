@@ -46,21 +46,41 @@ const MAX_IMAGES = 20;
  * Normalize an image file to a JPEG Blob via canvas.
  * This fixes mobile gallery uploads where file.type can be empty/unreliable
  * and the raw File object may fail to upload on some mobile browsers.
+ * Images are resized to max 2048px on the longest side to prevent
+ * out-of-memory crashes on mobile devices.
  */
+const MAX_IMAGE_DIMENSION = 2048;
+
 const normalizeImageFile = (file: File): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const imgEl = new window.Image();
+    const objectUrl = URL.createObjectURL(file);
     imgEl.onload = () => {
       try {
+        URL.revokeObjectURL(objectUrl);
+        let width = imgEl.naturalWidth;
+        let height = imgEl.naturalHeight;
+
+        // Resize to max dimension to prevent OOM on mobile
+        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+          if (width > height) {
+            height = Math.round(height * (MAX_IMAGE_DIMENSION / width));
+            width = MAX_IMAGE_DIMENSION;
+          } else {
+            width = Math.round(width * (MAX_IMAGE_DIMENSION / height));
+            height = MAX_IMAGE_DIMENSION;
+          }
+        }
+
         const canvas = document.createElement('canvas');
-        canvas.width = imgEl.naturalWidth;
-        canvas.height = imgEl.naturalHeight;
+        canvas.width = width;
+        canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           reject(new Error('Could not get canvas context'));
           return;
         }
-        ctx.drawImage(imgEl, 0, 0);
+        ctx.drawImage(imgEl, 0, 0, width, height);
         canvas.toBlob(
           (blob) => {
             if (blob) {
@@ -70,14 +90,17 @@ const normalizeImageFile = (file: File): Promise<Blob> => {
             }
           },
           'image/jpeg',
-          0.92
+          0.85
         );
       } catch (e) {
         reject(e);
       }
     };
-    imgEl.onerror = () => reject(new Error('Failed to load image for normalization'));
-    imgEl.src = URL.createObjectURL(file);
+    imgEl.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Failed to load image for normalization'));
+    };
+    imgEl.src = objectUrl;
   });
 };
 
@@ -152,7 +175,14 @@ const SubmitAssignment = () => {
   }, []);
 
   const validateImageFile = (file: File): string | null => {
-    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+    // On mobile (especially Android), file.type can be empty when picking from gallery.
+    // Fall back to extension check if file.type is missing.
+    const fileType = file.type || '';
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const validExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+    const isValidType = ACCEPTED_IMAGE_TYPES.includes(fileType) || validExtensions.includes(ext);
+    
+    if (!isValidType) {
       return `"${file.name}" is not a valid image. Only JPG, PNG, and WEBP are allowed.`;
     }
     if (file.size > MAX_FILE_SIZE) {

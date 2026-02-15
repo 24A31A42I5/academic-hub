@@ -81,9 +81,7 @@ const FilePreviewDialog = ({
       const urls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
       setResolvedUrls(urls);
     } finally {
-      if (retryCount >= 1 || !submissionId) {
-        setResolvingUrls(false);
-      }
+      setResolvingUrls(false);
     }
   }, [submissionId, fileUrls, fileUrl]);
 

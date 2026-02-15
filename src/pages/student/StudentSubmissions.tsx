@@ -133,9 +133,10 @@ const StudentSubmissions = () => {
       const { data, error } = await supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submission.id,
-          file_url: submission.file_url,
+          file_urls: submission.file_urls || (submission.file_url ? [submission.file_url] : []),
           file_type: submission.file_type,
-          student_profile_id: currentProfileId, // CRITICAL: Use verified profile ID
+          student_profile_id: currentProfileId,
+          page_count: submission.file_urls?.length || 1,
         },
       });
 
