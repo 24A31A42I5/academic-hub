@@ -37,10 +37,22 @@ interface StageInfo {
  */
 interface PageResult {
   same_writer: boolean;
-  confidence: number;
+  confidence: number; // 0-100 range validated by backend
 }
 
 type SubmissionRow = Database['public']['Tables']['submissions']['Row'];
+
+/**
+ * Type guard to check if analysis details contains page results
+ */
+function hasPageResults(details: unknown): details is { page_results: PageResult[] } {
+  return (
+    details !== null &&
+    typeof details === 'object' &&
+    'page_results' in details &&
+    Array.isArray((details as { page_results: unknown }).page_results)
+  );
+}
 
 export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgressProps>(
   ({ submissionId, pageCount = 1, onComplete }, ref) => {
@@ -65,9 +77,8 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
 
       if (row.page_verification_results) {
         setPageResults(row.page_verification_results as PageResult[]);
-      } else if (row.ai_analysis_details && typeof row.ai_analysis_details === 'object' && row.ai_analysis_details !== null && 'page_results' in row.ai_analysis_details) {
-        const details = row.ai_analysis_details as { page_results: PageResult[] };
-        setPageResults(details.page_results);
+      } else if (hasPageResults(row.ai_analysis_details)) {
+        setPageResults(row.ai_analysis_details.page_results);
       }
 
       const analysisDetails = row.ai_analysis_details as Record<string, unknown> | null;
