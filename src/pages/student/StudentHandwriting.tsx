@@ -208,7 +208,8 @@ const StudentHandwriting = () => {
           handwriting_submitted_at: new Date().toISOString(),
           handwriting_image_hash: imageHash,
         })
-        .eq('id', studentDetails.id);
+        .eq('id', studentDetails.id)
+        .eq('profile_id', currentProfileId); // CRITICAL: Ensure isolation
 
       if (updateError) throw updateError;
 

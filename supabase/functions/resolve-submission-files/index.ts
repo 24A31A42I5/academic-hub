@@ -6,7 +6,6 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -14,27 +13,23 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // Get authorization header to verify user
+    // Extract JWT token from authorization header
     const authHeader = req.headers.get('authorization');
-    if (!authHeader) {
+    const token = authHeader?.replace('Bearer ', '');
+
+    if (!token) {
       return new Response(
-        JSON.stringify({ error: 'Missing authorization header' }),
+        JSON.stringify({ error: 'Missing authorization token' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Create client with service role for storage operations
+    // Create admin client for all operations
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Create client with user token to verify access
-    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { authorization: authHeader } }
-    });
-
-    // Get user
-    const { data: { user }, error: userError } = await supabaseUser.auth.getUser();
+    // Verify user from JWT token using admin client
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
     if (userError || !user) {
       console.error('Auth error:', userError);
       return new Response(
@@ -72,13 +67,7 @@ Deno.serve(async (req) => {
     // Get submission with assignment info
     const { data: submission, error: submissionError } = await supabaseAdmin
       .from('submissions')
-      .select(`
-        id,
-        student_profile_id,
-        file_url,
-        file_urls,
-        assignment_id
-      `)
+      .select(`id, student_profile_id, file_url, file_urls, assignment_id`)
       .eq('id', submission_id)
       .single();
 
@@ -97,7 +86,7 @@ Deno.serve(async (req) => {
       .eq('id', submission.assignment_id)
       .single();
 
-    // Check access permissions
+    // Check access permissions - STRICT per-user isolation
     const isStudent = profile.role === 'student' && submission.student_profile_id === profile.id;
     const isFaculty = profile.role === 'faculty' && assignment?.faculty_profile_id === profile.id;
     const isAdmin = profile.role === 'admin';
@@ -110,9 +99,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Get file URLs to resolve
+    // Get file paths to resolve
     let filePaths: string[] = [];
-    
     if (submission.file_urls && submission.file_urls.length > 0) {
       filePaths = submission.file_urls;
     } else if (submission.file_url) {
@@ -123,16 +111,13 @@ Deno.serve(async (req) => {
 
     // Convert URLs/paths to storage paths
     const storagePaths = filePaths.map((url: string) => {
-      // If it's a full URL, extract the path after /object/public/uploads/
       if (url.includes('/storage/v1/object/public/uploads/')) {
         const match = url.match(/\/storage\/v1\/object\/public\/uploads\/(.+)/);
         return match ? match[1] : url;
       }
-      // If it's already a path (doesn't start with http), use as is
       if (!url.startsWith('http')) {
         return url;
       }
-      // Fallback: try to extract path after the bucket name
       const parts = url.split('/uploads/');
       return parts.length > 1 ? parts[1] : url;
     });
@@ -141,7 +126,6 @@ Deno.serve(async (req) => {
 
     // Generate signed URLs for each file
     const signedUrls: string[] = [];
-    
     for (const path of storagePaths) {
       try {
         const { data: signedData, error: signError } = await supabaseAdmin
@@ -153,7 +137,6 @@ Deno.serve(async (req) => {
           console.error(`Error creating signed URL for ${path}:`, signError);
           continue;
         }
-
         if (signedData?.signedUrl) {
           signedUrls.push(signedData.signedUrl);
         }
@@ -165,11 +148,7 @@ Deno.serve(async (req) => {
     console.log(`Generated ${signedUrls.length} signed URLs out of ${storagePaths.length} paths`);
 
     return new Response(
-      JSON.stringify({ 
-        success: true,
-        signed_urls: signedUrls,
-        count: signedUrls.length
-      }),
+      JSON.stringify({ success: true, signed_urls: signedUrls, count: signedUrls.length }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
