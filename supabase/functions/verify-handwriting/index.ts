@@ -29,7 +29,7 @@ interface PageResult {
   confidence: string;
 }
 
-async function fetchImageAsBase64(urlOrPath: string, supabase: any, studentUserId?: string): Promise<{ base64: string; size: number }> {
+async function fetchImageAsBase64(urlOrPath: string, supabase: ReturnType<typeof createClient>, studentUserId?: string): Promise<{ base64: string; size: number }> {
   console.log('Fetching image:', urlOrPath);
   
   let url = urlOrPath;
@@ -191,7 +191,7 @@ async function verifyPage(
   pageNumber: number,
   imageBase64: string,
   referenceBase64: string,
-  handwritingProfile: any,
+  handwritingProfile: Record<string, unknown>,
   apiKey: string
 ): Promise<PageResult> {
   const verificationPrompt = `You are an AI handwriting verification engine analyzing a SINGLE PAGE of a handwritten assignment.
@@ -455,7 +455,7 @@ serve(async (req) => {
 
         console.log(`Page ${pageNum} result:`, pageResult);
 
-      } catch (pageError: any) {
+      } catch (pageError: unknown) {
         console.error(`Error processing page ${pageNum}:`, pageError);
         // Add a fallback result for this page
         pageResults.push({
@@ -561,12 +561,12 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Verification error:', error);
     
     return new Response(JSON.stringify({
       success: false,
-      error: error.message,
+      error: error instanceof Error ? error.message : 'Unknown error',
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

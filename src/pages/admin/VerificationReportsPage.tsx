@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -33,7 +34,7 @@ interface VerificationReport {
   ai_confidence_score: number | null;
   ai_risk_level: string | null;
   ai_flagged_sections: string[] | null;
-  ai_analysis_details: any;
+  ai_analysis_details: Database['public']['Tables']['submissions']['Row']['ai_analysis_details'];
   verified_at: string | null;
   submitted_at: string;
   student_profile: {
@@ -401,7 +402,7 @@ const VerificationReportsPage = () => {
                     <CardTitle className="text-base">Detailed Analysis</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {Object.entries(selectedReport.ai_analysis_details.analysis_details).map(([key, value]: [string, any]) => (
+                    {Object.entries(selectedReport.ai_analysis_details.analysis_details).map(([key, value]: [string, { match: boolean; reason?: string }]) => (
                       <div key={key} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
                         {value.match ? (
                           <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />

@@ -185,7 +185,7 @@ RESPOND WITH ONLY THIS JSON (no markdown, no extra text):
     console.log('Gemini training response received');
 
     // Parse the handwriting profile
-    let handwritingProfile: any;
+    let handwritingProfile: Record<string, unknown>;
     try {
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {

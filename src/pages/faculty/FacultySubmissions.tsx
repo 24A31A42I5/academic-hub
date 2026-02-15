@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -73,12 +74,15 @@ interface Assignment {
   title: string;
 }
 
+type StudentProfile = Database['public']['Tables']['profiles']['Row'] & { student_details?: Database['public']['Tables']['student_details']['Row'][] };
+type DisplayItem = Submission | (StudentProfile & { assignment: Assignment; notSubmitted: boolean });
+
 const FacultySubmissions = () => {
   const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [allStudents, setAllStudents] = useState<any[]>([]);
+  const [allStudents, setAllStudents] = useState<StudentProfile[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -316,7 +320,7 @@ const FacultySubmissions = () => {
     return submissions;
   };
 
-  const filteredData = getDisplayData().filter((item: any) => {
+  const filteredData = getDisplayData().filter((item: DisplayItem) => {
     const sub = item as Submission;
     const details = item.notSubmitted 
       ? (item.student_profile?.student_details?.[0] || item.student_profile?.student_details)
@@ -607,7 +611,7 @@ const FacultySubmissions = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredData.map((item: any) => {
+                  filteredData.map((item: DisplayItem) => {
                     const details = item.notSubmitted 
                       ? (item.student_profile?.student_details?.[0] || item.student_profile?.student_details)
                       : getStudentDetails(item as Submission);

@@ -1,4 +1,4 @@
-import { useEffect, useState, forwardRef } from 'react';
+import { useEffect, useState, forwardRef, useCallback } from 'react';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent } from '@/components/ui/card';
 import { supabase } from '@/integrations/supabase/client';
@@ -14,6 +14,7 @@ import {
   Image
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { Database } from '@/integrations/supabase/types';
 
 interface VerificationProgressProps {
   submissionId: string;
@@ -29,6 +30,30 @@ interface StageInfo {
   progress: number;
 }
 
+/**
+ * Represents the verification result for a single page of a submission
+ * @property same_writer - Whether the page was written by the same author as the reference
+ * @property confidence - Confidence score as a percentage (0-100)
+ */
+interface PageResult {
+  same_writer: boolean;
+  confidence: number; // 0-100 range validated by backend
+}
+
+type SubmissionRow = Database['public']['Tables']['submissions']['Row'];
+
+/**
+ * Type guard to check if analysis details contains page results
+ */
+function hasPageResults(details: unknown): details is { page_results: PageResult[] } {
+  return (
+    details !== null &&
+    typeof details === 'object' &&
+    'page_results' in details &&
+    Array.isArray((details as { page_results: unknown }).page_results)
+  );
+}
+
 export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgressProps>(
   ({ submissionId, pageCount = 1, onComplete }, ref) => {
     const [stage, setStage] = useState<VerificationStage>('uploading');
@@ -39,9 +64,9 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
     const [isComplete, setIsComplete] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [errorType, setErrorType] = useState<string | null>(null);
-    const [pageResults, setPageResults] = useState<any[]>([]);
+    const [pageResults, setPageResults] = useState<PageResult[]>([]);
 
-    const applyBackendCompletionState = (row: any) => {
+    const applyBackendCompletionState = useCallback((row: SubmissionRow) => {
       if (!row?.verified_at) return;
 
       setStage('complete');
@@ -51,18 +76,18 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
       setRiskLevel(row.ai_risk_level);
 
       if (row.page_verification_results) {
-        setPageResults(row.page_verification_results);
-      } else if (row.ai_analysis_details?.page_results) {
+        setPageResults(row.page_verification_results as PageResult[]);
+      } else if (hasPageResults(row.ai_analysis_details)) {
         setPageResults(row.ai_analysis_details.page_results);
       }
 
-      const analysisDetails = row.ai_analysis_details;
-      if (analysisDetails?.error_type) {
+      const analysisDetails = row.ai_analysis_details as Record<string, unknown> | null;
+      if (analysisDetails && typeof analysisDetails.error_type === 'string') {
         setErrorType(analysisDetails.error_type);
       }
 
       onComplete?.(row.status, row.ai_similarity_score);
-    };
+    }, [onComplete]);
 
     const getStageLabel = (): string => {
       switch (stage) {
@@ -166,7 +191,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
             filter: `id=eq.${submissionId}`,
           },
           (payload) => {
-            const newData = payload.new as any;
+            const newData = payload.new as SubmissionRow;
             
             if (newData.verified_at) {
               applyBackendCompletionState(newData);
@@ -206,7 +231,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
         clearTimeout(timeoutTimer);
         supabase.removeChannel(channel);
       };
-    }, [submissionId, pageCount, onComplete, isComplete]);
+    }, [submissionId, pageCount, onComplete, isComplete, applyBackendCompletionState]);
 
     const StageIcon = stage === 'analyzing' ? Brain : 
                       stage === 'fetching' ? Eye :
@@ -320,7 +345,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
               <div className="pt-2 border-t border-border/50">
                 <p className="text-xs font-medium mb-2">Per-page scores:</p>
                 <div className="flex flex-wrap gap-1">
-                  {pageResults.map((result: any, idx: number) => (
+                  {pageResults.map((result: PageResult, idx: number) => (
                     <span
                       key={idx}
                       className={cn(

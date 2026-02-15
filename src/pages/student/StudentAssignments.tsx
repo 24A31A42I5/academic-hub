@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -40,7 +41,7 @@ const StudentAssignments = () => {
   const navigate = useNavigate();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [studentDetails, setStudentDetails] = useState<any>(null);
+  const [studentDetails, setStudentDetails] = useState<Database['public']['Tables']['student_details']['Row'] | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');

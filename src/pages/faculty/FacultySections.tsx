@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -89,7 +90,7 @@ const FacultySections = () => {
 
           return {
             key: `${sec.year}-${sec.semester || 'I'}-${sec.branch}-${sec.section}`,
-            students: (data || []).map((s: any) => ({
+            students: (data || []).map((s: Database['public']['Tables']['profiles']['Row'] & { student_details?: Database['public']['Tables']['student_details']['Row'] | Database['public']['Tables']['student_details']['Row'][] }) => ({
               id: s.id,
               full_name: s.full_name,
               email: s.email,

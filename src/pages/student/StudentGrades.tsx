@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
+import type { Database } from '@/integrations/supabase/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -34,7 +35,7 @@ const StudentGrades = () => {
   const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [gradedSubmissions, setGradedSubmissions] = useState<GradedSubmission[]>([]);
-  const [studentDetails, setStudentDetails] = useState<any>(null);
+  const [studentDetails, setStudentDetails] = useState<Database['public']['Tables']['student_details']['Row'] | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
