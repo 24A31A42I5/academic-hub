@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
 const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
@@ -49,81 +49,66 @@ serve(async (req) => {
     console.log('Image fetched, size:', imageBase64.length);
 
     // Build the prompt for Gemini to deeply learn this student's handwriting
-    const trainingPrompt = `You are a forensic handwriting expert. Analyze this handwriting sample and create a DETAILED PROFILE of this specific person's handwriting style. This profile will be used to verify their identity in future document submissions.
+    const trainingPrompt = `You are a FORENSIC DOCUMENT EXAMINER creating a biometric writer profile for writer identification purposes.
 
-STUDY THIS HANDWRITING SAMPLE CAREFULLY AND EXTRACT:
+CRITICAL: This is NOT image description, NOT transcription, NOT layout analysis, NOT visual similarity measurement.
 
-## 1. LETTER FORMATION CHARACTERISTICS
-- How does this person form each letter? (round, angular, loopy, pointed)
-- Specific quirks in letter shapes (e.g., open or closed 'a', rounded or pointed 'm')
-- How they write numbers (if visible)
-- Capital letter style vs lowercase
-- Any unique letter formations that stand out
+COMPLETELY IGNORE:
+- Words written, their meaning, topic, or content
+- Page layout and text positioning
+- Image quality, resolution, or lighting
+- Background texture or paper type
+- Ink color or pen type
+- Visual noise or artifacts
 
-## 2. SPACING AND LAYOUT
-- Letter spacing (tight, normal, wide)
-- Word spacing pattern
-- Line spacing
-- Margins and text positioning
-- How do they use the page?
+Extract ONLY these stylometric (writer-identifying) features:
 
-## 3. STROKE CHARACTERISTICS
-- Pen pressure patterns (heavy, light, varied)
-- Stroke direction preferences
-- Beginning and ending strokes of letters
-- Connections between letters (cursive, print, mixed)
-- Stroke thickness consistency
+1. LETTER SLANT: Measure the dominant slant angle and its consistency across the sample
+2. STROKE WIDTH: Classify as thin, medium, or thick; note variation patterns
+3. PEN PRESSURE: Identify pressure patterns — light, medium, heavy, or varied; note where pressure changes occur
+4. LETTER SPACING: Classify as cramped, normal, or wide; measure consistency
+5. WORD SPACING: Classify as tight, normal, or wide; measure consistency
+6. BASELINE: Assess consistency — stable, drifting upward, drifting downward, or wavy
+7. HEIGHT RATIO: Measure uppercase-to-lowercase height proportion
+8. LOOP FORMATIONS: Describe loop style for letters l, h, b, d, f, g, y — open/closed, round/narrow, size
+9. LETTER CONNECTIONS: Describe connection style — fully connected (cursive), disconnected (print), or mixed
+10. DISTINCTIVE LETTER FORMATIONS: Analyze specific formation of at least 5 of these letters: a, e, g, o, r, s, d, b, f, l, h — note unique quirks
+11. WRITING RHYTHM: Assess overall rhythm and consistency — steady, rushed, deliberate, irregular
 
-## 4. SLANT AND BASELINE
-- Overall slant direction and degree (left, vertical, right)
-- Baseline consistency (straight, wavy, ascending, descending)
-- Letter size consistency (uniform or varied)
-
-## 5. UNIQUE IDENTIFIERS
-- List 5-10 SPECIFIC, UNIQUE characteristics that make this handwriting identifiable
-- These should be features that would be hard to replicate
-- Include any distinctive quirks, flourishes, or unusual patterns
-
-## 6. OVERALL STYLE DESCRIPTION
-- A paragraph describing the general impression of this handwriting
-- Is it neat, messy, rushed, careful, artistic, mechanical?
-
-RESPOND WITH ONLY THIS JSON (no markdown, no extra text):
+Return ONLY this JSON (no markdown, no extra text):
 {
   "letter_formation": {
-    "overall_style": "<description>",
-    "lowercase_characteristics": "<detailed description>",
-    "uppercase_characteristics": "<detailed description>",
-    "number_style": "<if visible, describe>",
-    "unique_letter_quirks": ["<quirk1>", "<quirk2>", "..."]
+    "overall_style": "<angular/rounded/mixed>",
+    "lowercase_characteristics": "<detailed stylometric description>",
+    "uppercase_characteristics": "<detailed stylometric description>",
+    "distinctive_letters": {"<letter>": "<formation description>", ...for at least 5 letters}
   },
   "spacing": {
-    "letter_spacing": "<tight/normal/wide>",
+    "letter_spacing": "<cramped/normal/wide>",
     "word_spacing": "<tight/normal/wide>",
-    "line_spacing": "<tight/normal/wide>",
-    "overall_density": "<cramped/balanced/spacious>"
+    "spacing_consistency": "<uniform/varied>"
   },
   "stroke_characteristics": {
     "pressure": "<light/medium/heavy/varied>",
+    "stroke_width": "<thin/medium/thick/varied>",
     "connections": "<print/cursive/mixed>",
-    "stroke_thickness": "<thin/medium/thick/varied>",
-    "stroke_smoothness": "<smooth/angular/mixed>"
+    "pressure_change_pattern": "<description of where pressure varies>"
   },
   "slant_and_baseline": {
     "slant_direction": "<left/vertical/right>",
-    "slant_degree": "<slight/moderate/strong>",
-    "baseline_consistency": "<stable/slightly wavy/wavy/ascending/descending>",
-    "size_consistency": "<uniform/slightly varied/highly varied>"
+    "slant_consistency": "<consistent/slightly varied/highly varied>",
+    "baseline_behavior": "<stable/ascending/descending/wavy>",
+    "height_ratio_upper_lower": "<ratio description>"
   },
   "unique_identifiers": [
-    "<specific unique characteristic 1>",
-    "<specific unique characteristic 2>",
-    "<specific unique characteristic 3>",
-    "<specific unique characteristic 4>",
-    "<specific unique characteristic 5>"
+    "<specific biometric feature 1>",
+    "<specific biometric feature 2>",
+    "<specific biometric feature 3>",
+    "<specific biometric feature 4>",
+    "<specific biometric feature 5>"
   ],
-  "overall_description": "<2-3 sentence description of this person's handwriting style>",
-  "confidence_level": "<high/medium/low - based on sample quality>"
+  "overall_description": "<2-3 sentence stylometric signature summary focusing ONLY on writing mechanics>",
+  "confidence_level": <decimal 0 to 1>
 }`;
 
     console.log('Calling Gemini AI to learn handwriting style...');

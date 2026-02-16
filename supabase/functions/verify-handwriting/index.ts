@@ -177,45 +177,62 @@ async function verifyPage(
   handwritingProfile: any,
   apiKey: string
 ): Promise<PageResult> {
-  const verificationPrompt = `You are an AI handwriting verification engine analyzing a SINGLE PAGE of a handwritten assignment.
+  const verificationPrompt = `You are a FORENSIC HANDWRITING ANALYST performing biometric writer identification for an academic integrity system.
 
-CRITICAL RULES:
-1. ONLY analyze handwriting characteristics - ignore content, meaning, subject matter
-2. First determine if this page is HANDWRITTEN or TYPED/PRINTED
-3. If typed/printed → is_handwritten = false, similarity_score = 0
-4. If handwritten → compare against the student's trained profile
+CRITICAL: This is WRITER IDENTIFICATION based on stylometric features — NOT image comparison, NOT content matching, NOT visual similarity.
 
-## STUDENT'S KNOWN HANDWRITING PROFILE:
+COMPLETELY IGNORE:
+- Words written, text content, or meaning
+- Whether images look similar or identical as photographs
+- Page layout, margins, or text positioning
+- Background texture, paper type, or image quality
+- Ink color or pen type
+
+CORE PRINCIPLE:
+- SAME writer = consistent stylometric features even across DIFFERENT pages with DIFFERENT content
+- DIFFERENT writers = inconsistent stylometric features even with SIMILAR content
+- Even if two images appear visually identical, you MUST analyze stylometric features only
+
+## STUDENT'S KNOWN STYLOMETRIC PROFILE:
 ${JSON.stringify(handwritingProfile, null, 2)}
 
-## ANALYSIS FOCUS (forensic handwriting features):
-- Letter formation and stroke style
-- Curves, loops, hooks, and sharpness
-- Slant angle and baseline alignment
-- Spacing between letters and words
-- Character height ratios and proportions
-- Stroke thickness and pressure patterns
-- Writing rhythm, consistency, and connections
+## COMPARE ONLY THESE STYLOMETRIC FEATURES:
+1. Letter slant angle and consistency
+2. Stroke weight and pen pressure patterns
+3. Letter spacing patterns
+4. Word spacing patterns
+5. Baseline behavior (stable, ascending, descending, wavy)
+6. Loop formations in letters l, h, b, d, f, g, y
+7. Specific letter formations: a, e, g, o, r, s
+8. Letter connection style (cursive, print, mixed)
+9. Writing rhythm, density, and consistency
+10. Uppercase-to-lowercase height proportions
 
-## SCORING RULES:
-- Same writer with natural variation: similarity_score >= 75
-- Clearly different writer: similarity_score <= 30
-- Uncertain cases: similarity_score 40-74
-- Typed/printed content: is_handwritten = false, similarity_score = 0
+## FIRST: Determine if this page is HANDWRITTEN or TYPED/PRINTED
+- If typed/printed → is_handwritten = false, similarity_score = 0
+
+## SCORING (stylometric match ONLY):
+- Multiple distinctive stylometric features match: similarity_score >= 75
+- Clearly different writing mechanics: similarity_score <= 30
+- Uncertain stylometric match: similarity_score 40-74
+- Score 100 requires multiple distinctive feature matches — NEVER justified by image similarity alone
 
 ## DECISION:
 - similarity_score >= 75 → same_writer = true
 - similarity_score < 75 → same_writer = false
 
+## REASONING RULES:
+- Reasoning MUST reference specific handwriting features (slant, loops, spacing, pressure, etc.)
+- Reasoning MUST NOT mention visual similarity, image similarity, or content similarity
+
 Return ONLY valid JSON. No markdown. No explanations outside JSON.
 
-Output format exactly:
 {
-  "similarity_score": number from 0 to 100,
-  "same_writer": true or false,
-  "confidence_level": "low" or "medium" or "high",
-  "is_handwritten": true or false,
-  "key_observations": ["observation1", "observation2"]
+  "similarity_score": <integer 0-100>,
+  "same_writer": <boolean>,
+  "confidence_level": "<low|medium|high>",
+  "is_handwritten": <boolean>,
+  "key_observations": ["<stylometric observation 1>", "<stylometric observation 2>"]
 }`;
 
   const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
