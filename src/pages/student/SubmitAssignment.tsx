@@ -585,11 +585,11 @@ const SubmitAssignment = () => {
                 <input
                   ref={fileInputRef}
                   type="file"
-              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-              multiple
-              onChange={handleFileSelect}
-              className="hidden"
-              id="file-upload"
+                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  id="file-upload"
                 />
                 <Button
                   variant="student"
@@ -604,15 +604,17 @@ const SubmitAssignment = () => {
               </div>
             )}
 
-            {/* Hidden file input for adding more */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-              multiple
-              onChange={handleFileSelect}
-              className="hidden"
-            />
+            {/* Hidden file input for adding more (only rendered when images exist, avoids duplicate) */}
+            {selectedImages.length > 0 && (
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                multiple
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+            )}
 
             {/* Submit Button */}
             {selectedImages.length > 0 && (
