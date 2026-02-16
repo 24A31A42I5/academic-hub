@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
 const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
@@ -32,23 +32,38 @@ interface PageResult {
 async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64: string; size: number }> {
   console.log('Fetching image:', url);
   
-  // Check if this is a Supabase storage URL that needs a signed URL
-  const uploadsBucketMatch = url.match(/\/storage\/v1\/object\/public\/uploads\/(.+)$/);
-  if (uploadsBucketMatch) {
-    const filePath = uploadsBucketMatch[1];
-    console.log('Generating signed URL for private bucket, path:', filePath);
-    
+  // If it's a bare storage path (not starting with http), generate a signed URL
+  if (!url.startsWith('http')) {
+    console.log('Generating signed URL for storage path:', url);
     const { data: signedData, error: signedError } = await supabase.storage
       .from('uploads')
-      .createSignedUrl(filePath, 300); // 5 minute expiry
+      .createSignedUrl(url.split('?')[0], 300);
     
     if (signedError) {
       console.error('Error creating signed URL:', signedError);
       throw new Error(`Failed to access file: ${signedError.message}`);
     }
-    
     url = signedData.signedUrl;
-    console.log('Using signed URL');
+    console.log('Using signed URL for storage path');
+  } else {
+    // Check if this is a Supabase storage URL that needs a signed URL
+    const uploadsBucketMatch = url.match(/\/storage\/v1\/object\/public\/uploads\/(.+?)(\?.*)?$/);
+    if (uploadsBucketMatch) {
+      const filePath = uploadsBucketMatch[1];
+      console.log('Generating signed URL for private bucket, path:', filePath);
+      
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from('uploads')
+        .createSignedUrl(filePath, 300);
+      
+      if (signedError) {
+        console.error('Error creating signed URL:', signedError);
+        throw new Error(`Failed to access file: ${signedError.message}`);
+      }
+      
+      url = signedData.signedUrl;
+      console.log('Using signed URL');
+    }
   }
   
   const response = await fetch(url);
