@@ -41,6 +41,7 @@ interface AIAnalysisDetails {
 interface FlaggedSubmission {
   id: string;
   file_url: string;
+  file_urls?: string[] | null;
   file_type: string;
   status: string | null;
   marks: number | null;
@@ -90,6 +91,7 @@ const FacultyReviews = () => {
         .select(`
           id,
           file_url,
+          file_urls,
           file_type,
           status,
           marks,
@@ -450,9 +452,11 @@ const FacultyReviews = () => {
         open={!!previewSubmission}
         onOpenChange={() => setPreviewSubmission(null)}
         fileUrl={previewSubmission?.file_url || null}
+        fileUrls={previewSubmission?.file_urls}
         fileType={previewSubmission?.file_type || null}
         studentName={previewSubmission?.student_profile?.full_name}
         assignmentTitle={previewSubmission?.assignment?.title}
+        submissionId={previewSubmission?.id || ''}
       />
     </DashboardLayout>
   );

@@ -203,6 +203,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     await supabase.auth.signOut();
     setProfile(null);
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (_) { /* ignore in restricted environments */ }
   };
 
   return (

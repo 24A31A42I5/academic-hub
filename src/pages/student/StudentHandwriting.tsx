@@ -256,37 +256,56 @@ const StudentHandwriting = () => {
 
   // Retrain/re-extract features from existing handwriting sample
   const handleRetrainFeatures = async () => {
-    if (!studentDetails?.handwriting_url || !studentDetails?.id) {
+    if (!studentDetails?.handwriting_url || !studentDetails?.id || studentDetails.profile_id !== profile?.id) {
       toast.error('No handwriting sample found');
       return;
     }
 
     setRetraining(true);
     try {
+      // Step 1: Null out old features first
+      const { error: clearError } = await supabase
+        .from('student_details')
+        .update({
+          handwriting_feature_embedding: null,
+          handwriting_features_extracted_at: null,
+        })
+        .eq('id', studentDetails.id)
+        .eq('profile_id', profile!.id);
+
+      if (clearError) {
+        toast.error('Failed to clear old features');
+        return;
+      }
+
+      // Step 2: Build cache-busted URL
+      const freshUrl = `${studentDetails.handwriting_url.split('?')[0]}?t=${Date.now()}`;
+
+      // Step 3: Re-extract features
       const { data, error } = await supabase.functions.invoke('extract-handwriting-features', {
         body: {
-          image_url: studentDetails.handwriting_url,
+          image_url: freshUrl,
           student_details_id: studentDetails.id,
         },
       });
 
       if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Feature extraction failed');
 
-      if (data?.success) {
-        toast.success('Features re-extracted successfully!');
-        // Refresh student details
-        const { data: updatedDetails } = await supabase
-          .from('student_details')
-          .select('*')
-          .eq('id', studentDetails.id)
-          .single();
-        setStudentDetails(updatedDetails);
-      } else {
-        toast.error(data?.error || 'Feature extraction failed');
-      }
+      toast.success('Handwriting model retrained successfully!');
+
+      // Step 4: Refresh local state
+      const { data: updatedDetails } = await supabase
+        .from('student_details')
+        .select('*')
+        .eq('id', studentDetails.id)
+        .eq('profile_id', profile!.id)
+        .single();
+
+      setStudentDetails(updatedDetails);
     } catch (error: any) {
       console.error('Retrain error:', error);
-      toast.error('Failed to re-extract features');
+      toast.error(`Retrain failed: ${error.message}`);
     } finally {
       setRetraining(false);
     }
