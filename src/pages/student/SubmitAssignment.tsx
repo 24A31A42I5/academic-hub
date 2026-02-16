@@ -107,13 +107,69 @@ const SubmitAssignment = () => {
   }, []);
 
   const validateImageFile = (file: File): string | null => {
-    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-      return `"${file.name}" is not a valid image. Only JPG, PNG, and WEBP are allowed.`;
+    const ext = (file.name.split('.').pop() ?? '').toLowerCase();
+    const isValidType = ACCEPTED_IMAGE_TYPES.includes(file.type) || ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+
+    if (!isValidType) {
+      return `"${file.name}" is not a supported image format. Use JPG, PNG, or WEBP.`;
     }
     if (file.size > MAX_FILE_SIZE) {
-      return `"${file.name}" is too large. Maximum file size is 10MB per image.`;
+      return `"${file.name}" exceeds 10MB. Please compress it before uploading.`;
     }
     return null;
+  };
+
+  const normalizeImageFile = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(file);
+      const imgEl = new window.Image();
+
+      imgEl.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+
+        let { naturalWidth: w, naturalHeight: h } = imgEl;
+
+        if (w > 1920 || h > 1920) {
+          if (w >= h) {
+            h = Math.round(h * (1920 / w));
+            w = 1920;
+          } else {
+            w = Math.round(w * (1920 / h));
+            h = 1920;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas context unavailable'));
+          return;
+        }
+
+        ctx.drawImage(imgEl, 0, 0, w, h);
+
+        canvas.toBlob(
+          (blob) => {
+            canvas.width = 0;
+            canvas.height = 0;
+            if (blob) resolve(blob);
+            else reject(new Error('Canvas toBlob returned null'));
+          },
+          'image/jpeg',
+          0.85
+        );
+      };
+
+      imgEl.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Image failed to load — file may be corrupted'));
+      };
+
+      imgEl.src = objectUrl;
+    });
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -195,27 +251,26 @@ const SubmitAssignment = () => {
       const uploadedUrls: string[] = [];
       const timestamp = Date.now();
 
-      // Upload all images in order
+      // Upload all images in order (normalized)
       for (let i = 0; i < selectedImages.length; i++) {
         const img = selectedImages[i];
-        const ext = img.file.name.split('.').pop() || 'jpg';
-        const fileName = `${user.id}/${assignment.id}/page_${i + 1}_${timestamp}.${ext}`;
+        const fileName = `${user.id}/${assignment.id}/page_${i + 1}_${timestamp}.jpg`;
+
+        // Normalize image for mobile compatibility
+        const normalizedBlob = await normalizeImageFile(img.file);
 
         const { error: uploadError } = await supabase.storage
           .from('uploads')
-          .upload(fileName, img.file, {
-            cacheControl: '3600',
+          .upload(fileName, normalizedBlob, {
+            contentType: 'image/jpeg',
+            cacheControl: 'no-cache',
             upsert: true,
           });
 
         if (uploadError) throw uploadError;
 
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('uploads')
-          .getPublicUrl(fileName);
-
-        uploadedUrls.push(publicUrl);
+        // Store the storage path (not public URL) for private bucket
+        uploadedUrls.push(fileName);
       }
 
       // Check if deadline passed
@@ -242,12 +297,17 @@ const SubmitAssignment = () => {
 
       // Create or update submission
       if (existingSubmission) {
-        const { error } = await supabase
+        // Fix 10: Chain .select('id') to detect RLS rejection
+        const { data: updatedRows, error } = await supabase
           .from('submissions')
           .update(baseSubmission)
-          .eq('id', existingSubmission.id);
+          .eq('id', existingSubmission.id)
+          .select('id');
 
         if (error) throw error;
+        if (!updatedRows || updatedRows.length === 0) {
+          throw new Error('Submission update was blocked — this assignment may already be graded.');
+        }
         submissionId = existingSubmission.id;
       } else {
         const { data: newSubmission, error } = await supabase
@@ -525,11 +585,11 @@ const SubmitAssignment = () => {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".jpg,.jpeg,.png,.webp"
-                  multiple
-                  onChange={handleFileSelect}
-                  className="hidden"
-                  id="file-upload"
+              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+              id="file-upload"
                 />
                 <Button
                   variant="student"
@@ -548,7 +608,7 @@ const SubmitAssignment = () => {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".jpg,.jpeg,.png,.webp"
+              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
               multiple
               onChange={handleFileSelect}
               className="hidden"

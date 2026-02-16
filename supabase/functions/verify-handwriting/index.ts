@@ -282,9 +282,36 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Get student's trained handwriting profile
+    // Fix 8: Ownership verification before processing
+    const { data: ownerCheck } = await supabase
+      .from('submissions')
+      .select('student_profile_id')
+      .eq('id', submission_id)
+      .single();
+
+    if (!ownerCheck || ownerCheck.student_profile_id !== student_profile_id) {
+      throw new Error('Submission does not belong to the claimed student profile');
+    }
+
+    const { data: studentProfile } = await supabase
+      .from('profiles')
+      .select('user_id')
+      .eq('id', student_profile_id)
+      .single();
+
+    for (const path of imageUrls) {
+      const storagePath = path.startsWith('http')
+        ? path.split('/uploads/')[1]?.split('?')[0]
+        : path;
+      if (storagePath && !storagePath.startsWith(studentProfile!.user_id + '/')) {
+        throw new Error(`Access denied: file path does not belong to student`);
+      }
+    }
+
+    // Fix 3: Add handwriting_features_extracted_at for CDN cache busting
     const { data: studentDetails, error: studentError } = await supabase
       .from('student_details')
-      .select('handwriting_feature_embedding, handwriting_url, roll_number')
+      .select('handwriting_feature_embedding, handwriting_url, handwriting_features_extracted_at, roll_number')
       .eq('profile_id', student_profile_id)
       .single();
 
@@ -328,9 +355,15 @@ serve(async (req) => {
       });
     }
 
-    // Fetch reference image
-    console.log('Fetching reference handwriting sample...');
-    const { base64: referenceBase64, size: refSize } = await fetchImageAsBase64(referenceImageUrl, supabase);
+    // Fix 3: Build cache-busted reference URL
+    const extractedAt = studentDetails?.handwriting_features_extracted_at
+      ? new Date(studentDetails.handwriting_features_extracted_at).getTime()
+      : Date.now();
+    const cacheBustedReferenceUrl = `${referenceImageUrl!.split('?')[0]}?t=${extractedAt}`;
+
+    // Fetch reference image with cache-busted URL
+    console.log('Fetching reference handwriting sample (cache-busted)...');
+    const { base64: referenceBase64, size: refSize } = await fetchImageAsBase64(cacheBustedReferenceUrl, supabase);
     console.log('Reference image size:', refSize, 'bytes');
 
     // Process each page

@@ -116,12 +116,20 @@ const StudentSubmissions = () => {
     toast.info('Starting verification...', { duration: 2000 });
 
     try {
+      // Fix 6: Send all pages, not just file_url
+      const allFileUrls = submission.file_urls?.length
+        ? submission.file_urls
+        : submission.file_url
+          ? [submission.file_url]
+          : [];
+
       const { data, error } = await supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submission.id,
-          file_url: submission.file_url,
+          file_urls: allFileUrls,
           file_type: submission.file_type,
           student_profile_id: profile?.id,
+          page_count: allFileUrls.length,
         },
       });
 
