@@ -126,18 +126,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { error: profileError };
       }
 
-      // Create user role
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .insert({
-          user_id: authData.user.id,
-          role
-        });
-
-      if (roleError) {
-        logger.error('Role creation error', roleError);
-        return { error: roleError };
-      }
+      // user_roles is now auto-created by database trigger on profile insert
 
       // Create role-specific details
       if (role === 'student' && additionalData) {

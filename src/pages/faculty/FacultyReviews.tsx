@@ -343,10 +343,12 @@ const FacultyReviews = () => {
                     </div>
                   </div>
                   <div className="flex gap-2 ml-4">
-                    <Button variant="ghost" size="sm" asChild>
-                      <a href={submission.file_url} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => setPreviewSubmission(submission)}
+                    >
+                      <Eye className="w-4 h-4" />
                     </Button>
                     <Button variant="faculty" size="sm" onClick={() => openReview(submission)}>
                       <Eye className="w-4 h-4 mr-1" />

@@ -95,11 +95,13 @@ const StudentHandwriting = () => {
       const img = document.createElement('img');
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
+      const objectUrl = URL.createObjectURL(file);
 
       img.onload = () => {
         canvas.width = img.width;
         canvas.height = img.height;
         ctx?.drawImage(img, 0, 0);
+        URL.revokeObjectURL(objectUrl);
         
         canvas.toBlob((blob) => {
           if (blob) {
@@ -110,8 +112,11 @@ const StudentHandwriting = () => {
         }, 'image/jpeg', 0.95);
       };
 
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = URL.createObjectURL(file);
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Failed to load image'));
+      };
+      img.src = objectUrl;
     });
   };
 
@@ -168,7 +173,7 @@ const StudentHandwriting = () => {
         .from('handwriting-samples')
         .upload(fileName, strippedImage, {
           cacheControl: '3600',
-          upsert: false,
+          upsert: true,
           contentType: 'image/jpeg',
         });
 

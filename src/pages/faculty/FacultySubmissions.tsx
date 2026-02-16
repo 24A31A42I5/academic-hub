@@ -406,8 +406,11 @@ const FacultySubmissions = () => {
     // Only allow grading once verification actually completed.
     if (!submission.verified_at) return false;
 
-    // Allow grading only for verified (low risk) or "no sample" submissions.
-    return submission.ai_risk_level === 'low' || submission.ai_risk_level === 'unverified';
+    // Allow grading for verified, unverified, medium risk, and needs_manual_review submissions.
+    return submission.ai_risk_level === 'low' 
+      || submission.ai_risk_level === 'unverified'
+      || submission.ai_risk_level === 'medium'
+      || submission.status === 'needs_manual_review';
   };
 
   const stats = {
@@ -645,11 +648,13 @@ const FacultySubmissions = () => {
                         <TableCell className="text-right">
                           {!item.notSubmitted && (
                             <div className="flex justify-end gap-2">
-                              {item.file_url && canGradeSubmission(item as Submission) && (
-                                <Button variant="ghost" size="sm" asChild>
-                                  <a href={item.file_url} target="_blank" rel="noopener noreferrer">
-                                    <ExternalLink className="w-4 h-4" />
-                                  </a>
+                              {item.file_url && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => setPreviewSubmission(item as Submission)}
+                                >
+                                  <Eye className="w-4 h-4" />
                                 </Button>
                               )}
                               {canGradeSubmission(item as Submission) ? (
