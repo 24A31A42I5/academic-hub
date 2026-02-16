@@ -9,8 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { VerificationDetailsDialog } from '@/components/submission/VerificationDetailsDialog';
-import FilePreviewDialog from '@/components/faculty/FilePreviewDialog';
-import { Loader2, FileText, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload, Eye } from 'lucide-react';
+import { Loader2, FileText, ExternalLink, Clock, CheckCircle, Shield, AlertTriangle, RefreshCw, XCircle, Zap, Upload, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -52,15 +51,11 @@ interface Submission {
 }
 
 const StudentSubmissions = () => {
-  const { profile, user, loading: authLoading } = useAuth();
+  const { profile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [studentDetails, setStudentDetails] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-
-  // CRITICAL: Capture current profile ID for strict data isolation
-  const currentProfileId = profile?.id;
-  const currentUserId = user?.id;
 
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'student')) {
@@ -71,13 +66,10 @@ const StudentSubmissions = () => {
   const [verifyingIds, setVerifyingIds] = useState<Set<string>>(new Set());
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
-  const [previewSubmission, setPreviewSubmission] = useState<Submission | null>(null);
 
   const fetchSubmissions = useCallback(async () => {
-    // CRITICAL: Always require current profile ID for data isolation
-    if (!profile || !currentProfileId) return;
+    if (!profile) return;
     
-    // STRICTLY fetch only current student's submissions
     const { data, error } = await supabase
       .from('submissions')
       .select(`
@@ -105,13 +97,13 @@ const StudentSubmissions = () => {
           deadline
         )
       `)
-      .eq('student_profile_id', currentProfileId)
+      .eq('student_profile_id', profile.id)
       .order('submitted_at', { ascending: false });
 
     if (!error && data) {
       setSubmissions(data as unknown as Submission[]);
     }
-  }, [profile, currentProfileId]);
+  }, [profile]);
 
   const handleViewDetails = (submission: Submission) => {
     setSelectedSubmission(submission);
@@ -120,12 +112,6 @@ const StudentSubmissions = () => {
 
   // Manual verify function for stuck submissions
   const handleManualVerify = async (submission: Submission) => {
-    // CRITICAL: Verify submission belongs to current student
-    if (!currentProfileId || submission.id === undefined) {
-      toast.error('Cannot verify: session error');
-      return;
-    }
-
     setVerifyingIds(prev => new Set(prev).add(submission.id));
     toast.info('Starting verification...', { duration: 2000 });
 
@@ -133,10 +119,9 @@ const StudentSubmissions = () => {
       const { data, error } = await supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submission.id,
-          file_urls: submission.file_urls || (submission.file_url ? [submission.file_url] : []),
+          file_url: submission.file_url,
           file_type: submission.file_type,
-          student_profile_id: currentProfileId,
-          page_count: submission.file_urls?.length || 1,
+          student_profile_id: profile?.id,
         },
       });
 
@@ -174,15 +159,13 @@ const StudentSubmissions = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      // CRITICAL: Always require current profile ID for data isolation
-      if (!profile || !currentProfileId) return;
+      if (!profile) return;
 
       try {
-        // STRICTLY fetch only current student's details
         const { data: detailsRes } = await supabase
           .from('student_details')
           .select('*')
-          .eq('profile_id', currentProfileId)
+          .eq('profile_id', profile.id)
           .maybeSingle();
 
         setStudentDetails(detailsRes);
@@ -201,18 +184,17 @@ const StudentSubmissions = () => {
 
   // Real-time subscription for verification status updates
   useEffect(() => {
-    // CRITICAL: Only subscribe to current student's updates
-    if (!profile || !currentProfileId) return;
+    if (!profile) return;
 
     const channel = supabase
-      .channel(`submission-updates-${currentProfileId}`) // Namespaced channel per student
+      .channel('submission-updates')
       .on(
         'postgres_changes',
         {
           event: 'UPDATE',
           schema: 'public',
           table: 'submissions',
-          filter: `student_profile_id=eq.${currentProfileId}`,
+          filter: `student_profile_id=eq.${profile.id}`,
         },
         (payload) => {
           console.log('Submission updated:', payload);
@@ -257,7 +239,7 @@ const StudentSubmissions = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile, currentProfileId]);
+  }, [profile]);
 
   const getVerificationBadge = (submission: Submission) => {
     const hasVerificationResult = !!submission.verified_at;
@@ -325,7 +307,7 @@ const StudentSubmissions = () => {
               </Badge>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Score 50–69: faculty manual review required</p>
+              <p>Score 50–79: faculty manual review required</p>
             </TooltipContent>
           </Tooltip>
         );
@@ -529,16 +511,13 @@ const StudentSubmissions = () => {
                             </TooltipContent>
                           </Tooltip>
                         )}
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => setPreviewSubmission(submission)}
-                          title={submission.file_urls && submission.file_urls.length > 1 ? `View ${submission.file_urls.length} pages` : 'View file'}
-                        >
-                          <Eye className="w-4 h-4" />
-                          {submission.file_urls && submission.file_urls.length > 1 && (
-                            <span className="ml-1 text-xs">({submission.file_urls.length})</span>
-                          )}
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={submission.file_url} target="_blank" rel="noopener noreferrer" title={submission.file_urls && submission.file_urls.length > 1 ? `${submission.file_urls.length} pages` : 'View file'}>
+                            <ExternalLink className="w-4 h-4" />
+                            {submission.file_urls && submission.file_urls.length > 1 && (
+                              <span className="ml-1 text-xs">({submission.file_urls.length})</span>
+                            )}
+                          </a>
                         </Button>
                       </div>
                     </TableCell>
@@ -563,18 +542,6 @@ const StudentSubmissions = () => {
           }}
         />
       )}
-
-      {/* File Preview Dialog */}
-      <FilePreviewDialog
-        open={!!previewSubmission}
-        onOpenChange={() => setPreviewSubmission(null)}
-        fileUrl={previewSubmission?.file_url || null}
-        fileUrls={previewSubmission?.file_urls}
-        fileType={previewSubmission?.file_type || null}
-        studentName={profile?.full_name}
-        assignmentTitle={previewSubmission?.assignment?.title}
-        submissionId={previewSubmission?.id}
-      />
     </DashboardLayout>
   );
 };

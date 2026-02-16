@@ -1,10 +1,9 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { useEffect, useRef } from "react";
+import { AuthProvider } from "@/contexts/AuthContext";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -29,28 +28,9 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-// Component to clear React Query cache when user changes (prevents cross-user data leakage)
-const UserCacheClearer = () => {
-  const { user } = useAuth();
-  const qc = useQueryClient();
-  const prevUserId = useRef<string | null>(null);
-
-  useEffect(() => {
-    const currentId = user?.id ?? null;
-    if (prevUserId.current !== null && currentId !== prevUserId.current) {
-      // User changed or logged out — clear all cached queries
-      qc.clear();
-    }
-    prevUserId.current = currentId;
-  }, [user?.id, qc]);
-
-  return null;
-};
-
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <UserCacheClearer />
       <TooltipProvider>
         <Toaster />
         <Sonner />

@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ExternalLink, Download, Image, Loader2, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/integrations/supabase/client';
 
 interface FilePreviewDialogProps {
   open: boolean;
@@ -14,7 +13,6 @@ interface FilePreviewDialogProps {
   fileType: string | null;
   studentName?: string;
   assignmentTitle?: string;
-  submissionId?: string; // Add submission ID for signed URL resolution
 }
 
 const FilePreviewDialog = ({
@@ -25,91 +23,20 @@ const FilePreviewDialog = ({
   fileType,
   studentName,
   assignmentTitle,
-  submissionId,
 }: FilePreviewDialogProps) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
-  const [resolvedUrls, setResolvedUrls] = useState<string[]>([]);
-  const [resolvingUrls, setResolvingUrls] = useState(false);
 
-  // Resolve signed URLs when dialog opens, with retry for mobile reliability
-  const resolveSignedUrls = useCallback(async (retryCount = 0) => {
-    if (!submissionId) {
-      // If no submissionId, use the provided URLs directly (backwards compat)
-      const urls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
-      setResolvedUrls(urls);
-      return;
-    }
+  // Use fileUrls if available, otherwise fall back to single fileUrl
+  const allUrls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
+  const totalPages = allUrls.length;
+  const currentUrl = allUrls[currentPage] || null;
 
-    setResolvingUrls(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('resolve-submission-files', {
-        body: { submission_id: submissionId }
-      });
-
-      if (error) {
-        console.error('Error resolving URLs:', error);
-        // Retry once on failure (helps with mobile network issues)
-        if (retryCount < 1) {
-          console.log('Retrying signed URL resolution...');
-          setTimeout(() => resolveSignedUrls(retryCount + 1), 1500);
-          return;
-        }
-        // Fallback to original URLs after retry exhausted
-        const urls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
-        setResolvedUrls(urls);
-      } else if (data?.signed_urls && data.signed_urls.length > 0) {
-        setResolvedUrls(data.signed_urls);
-      } else {
-        // Retry once if empty result (mobile timing issue)
-        if (retryCount < 1) {
-          console.log('Empty result, retrying...');
-          setTimeout(() => resolveSignedUrls(retryCount + 1), 1500);
-          return;
-        }
-        const urls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
-        setResolvedUrls(urls);
-      }
-    } catch (err) {
-      console.error('Failed to resolve signed URLs:', err);
-      if (retryCount < 1) {
-        console.log('Retrying after exception...');
-        setTimeout(() => resolveSignedUrls(retryCount + 1), 1500);
-        return;
-      }
-      const urls = fileUrls && fileUrls.length > 0 ? fileUrls : (fileUrl ? [fileUrl] : []);
-      setResolvedUrls(urls);
-    } finally {
-      setResolvingUrls(false);
-    }
-  }, [submissionId, fileUrls, fileUrl]);
-
-  // Reset state and resolve URLs when dialog opens
-  useEffect(() => {
-    if (open) {
-      setCurrentPage(0);
-      setLoading(true);
-      setError(false);
-      setResolvedUrls([]);
-      resolveSignedUrls();
-    }
-  }, [open, submissionId, resolveSignedUrls]);
-
-  const totalPages = resolvedUrls.length;
-  const currentUrl = resolvedUrls[currentPage] || null;
-
-  // Guard against stale page index if the URL list changes.
-  useEffect(() => {
-    if (currentPage > 0 && currentPage >= totalPages) {
-      setCurrentPage(0);
-    }
-  }, [currentPage, totalPages]);
-
-  if (!open) return null;
+  if (!currentUrl) return null;
 
   const isImage = fileType?.startsWith('image') || 
-    (currentUrl && currentUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp)/i));
+    currentUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i);
 
   const handleLoad = () => {
     setLoading(false);
@@ -123,56 +50,21 @@ const FilePreviewDialog = ({
 
   const goToPrevious = () => {
     setLoading(true);
-    setError(false);
     setCurrentPage(prev => Math.max(0, prev - 1));
   };
 
   const goToNext = () => {
     setLoading(true);
-    setError(false);
     setCurrentPage(prev => Math.min(totalPages - 1, prev + 1));
   };
 
   const getPreviewContent = () => {
-    if (resolvingUrls) {
-      return (
-        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-          <Loader2 className="w-12 h-12 mb-4 animate-spin text-primary" />
-          <p className="text-lg font-medium">Loading files...</p>
-        </div>
-      );
-    }
-
-    if (!currentUrl) {
-      return (
-        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-          <AlertCircle className="w-12 h-12 mb-4 text-yellow-500" />
-          <p className="text-lg font-medium">No files found</p>
-          <p className="text-sm mt-2">This submission has no viewable files</p>
-        </div>
-      );
-    }
-
     if (error) {
       return (
         <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
           <AlertCircle className="w-12 h-12 mb-4 text-destructive" />
           <p className="text-lg font-medium">Unable to preview file</p>
           <p className="text-sm mt-2">Please download or open in a new tab</p>
-          <div className="flex gap-2 mt-4">
-            <Button variant="outline" asChild>
-              <a href={currentUrl} download>
-                <Download className="w-4 h-4 mr-2" />
-                Download File
-              </a>
-            </Button>
-            <Button variant="default" asChild>
-              <a href={currentUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="w-4 h-4 mr-2" />
-                Open in New Tab
-              </a>
-            </Button>
-          </div>
         </div>
       );
     }
@@ -182,16 +74,13 @@ const FilePreviewDialog = ({
         <div className="relative min-h-[400px] flex items-center justify-center">
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <Loader2 className="w-8 h-8 animate-spin text-faculty" />
             </div>
           )}
           <img
             src={currentUrl}
             alt={`Page ${currentPage + 1} - Submission by ${studentName}`}
-            className={cn(
-              "max-w-full max-h-[60vh] object-contain rounded-lg",
-              loading && "opacity-0"
-            )}
+            className="max-w-full max-h-[60vh] object-contain rounded-lg"
             onLoad={handleLoad}
             onError={handleError}
           />
@@ -212,7 +101,7 @@ const FilePreviewDialog = ({
               Download File
             </a>
           </Button>
-          <Button variant="default" asChild>
+          <Button variant="faculty" asChild>
             <a href={currentUrl} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="w-4 h-4 mr-2" />
               Open in New Tab
@@ -229,7 +118,6 @@ const FilePreviewDialog = ({
         setCurrentPage(0);
         setLoading(true);
         setError(false);
-        setResolvedUrls([]);
       }
       onOpenChange(isOpen);
     }}>
@@ -272,14 +160,13 @@ const FilePreviewDialog = ({
         )}
 
         {/* Thumbnail strip for multi-page */}
-        {totalPages > 1 && !resolvingUrls && (
+        {totalPages > 1 && (
           <div className="flex gap-2 overflow-x-auto pb-2 px-1">
-            {resolvedUrls.map((url, idx) => (
+            {allUrls.map((url, idx) => (
               <button
                 key={idx}
                 onClick={() => {
                   setLoading(true);
-                  setError(false);
                   setCurrentPage(idx);
                 }}
                 className={cn(
@@ -308,22 +195,18 @@ const FilePreviewDialog = ({
             {totalPages > 1 && `${totalPages} pages total`}
           </div>
           <div className="flex gap-2">
-            {currentUrl && (
-              <>
-                <Button variant="outline" asChild>
-                  <a href={currentUrl} download>
-                    <Download className="w-4 h-4 mr-2" />
-                    Download
-                  </a>
-                </Button>
-                <Button variant="default" asChild>
-                  <a href={currentUrl} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    Open in New Tab
-                  </a>
-                </Button>
-              </>
-            )}
+            <Button variant="outline" asChild>
+              <a href={currentUrl} download>
+                <Download className="w-4 h-4 mr-2" />
+                Download
+              </a>
+            </Button>
+            <Button variant="faculty" asChild>
+              <a href={currentUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Open in New Tab
+              </a>
+            </Button>
           </div>
         </div>
       </DialogContent>

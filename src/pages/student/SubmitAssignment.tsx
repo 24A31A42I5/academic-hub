@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef } from 'react';
-import { useCallback } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -42,71 +41,9 @@ const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per image
 const MAX_IMAGES = 20;
 
-/**
- * Normalize an image file to a JPEG Blob via canvas.
- * This fixes mobile gallery uploads where file.type can be empty/unreliable
- * and the raw File object may fail to upload on some mobile browsers.
- * Images are resized to max 2048px on the longest side to prevent
- * out-of-memory crashes on mobile devices.
- */
-const MAX_IMAGE_DIMENSION = 2048;
-
-const normalizeImageFile = (file: File): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
-    const imgEl = new window.Image();
-    const objectUrl = URL.createObjectURL(file);
-    imgEl.onload = () => {
-      try {
-        URL.revokeObjectURL(objectUrl);
-        let width = imgEl.naturalWidth;
-        let height = imgEl.naturalHeight;
-
-        // Resize to max dimension to prevent OOM on mobile
-        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
-          if (width > height) {
-            height = Math.round(height * (MAX_IMAGE_DIMENSION / width));
-            width = MAX_IMAGE_DIMENSION;
-          } else {
-            width = Math.round(width * (MAX_IMAGE_DIMENSION / height));
-            height = MAX_IMAGE_DIMENSION;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Could not get canvas context'));
-          return;
-        }
-        ctx.drawImage(imgEl, 0, 0, width, height);
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error('Canvas toBlob returned null'));
-            }
-          },
-          'image/jpeg',
-          0.85
-        );
-      } catch (e) {
-        reject(e);
-      }
-    };
-    imgEl.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error('Failed to load image for normalization'));
-    };
-    imgEl.src = objectUrl;
-  });
-};
-
 const SubmitAssignment = () => {
   const { assignmentId } = useParams<{ assignmentId: string }>();
-  const { profile, user, session, loading: authLoading } = useAuth();
+  const { profile, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [existingSubmission, setExistingSubmission] = useState<any>(null);
@@ -119,10 +56,6 @@ const SubmitAssignment = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Verify we have valid user and profile before any operations
-  const currentUserId = user?.id;
-  const currentProfileId = profile?.id;
-
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'student')) {
       navigate('/auth');
@@ -131,8 +64,7 @@ const SubmitAssignment = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      // CRITICAL: Always check for current user's profile
-      if (!profile || !assignmentId || !currentProfileId) return;
+      if (!profile || !assignmentId) return;
 
       try {
         // Fetch assignment
@@ -145,12 +77,12 @@ const SubmitAssignment = () => {
         if (assignmentError) throw assignmentError;
         setAssignment(assignmentData);
 
-        // Check for existing submission - STRICTLY for current student only
+        // Check for existing submission
         const { data: submissionData } = await supabase
           .from('submissions')
           .select('*')
           .eq('assignment_id', assignmentId)
-          .eq('student_profile_id', currentProfileId)
+          .eq('student_profile_id', profile.id)
           .maybeSingle();
 
         setExistingSubmission(submissionData);
@@ -165,7 +97,7 @@ const SubmitAssignment = () => {
     if (profile?.role === 'student') {
       fetchData();
     }
-  }, [profile, assignmentId, currentProfileId]);
+  }, [profile, assignmentId]);
 
   // Cleanup preview URLs on unmount
   useEffect(() => {
@@ -175,14 +107,7 @@ const SubmitAssignment = () => {
   }, []);
 
   const validateImageFile = (file: File): string | null => {
-    // On mobile (especially Android), file.type can be empty when picking from gallery.
-    // Fall back to extension check if file.type is missing.
-    const fileType = file.type || '';
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    const validExtensions = ['jpg', 'jpeg', 'png', 'webp'];
-    const isValidType = ACCEPTED_IMAGE_TYPES.includes(fileType) || validExtensions.includes(ext);
-    
-    if (!isValidType) {
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
       return `"${file.name}" is not a valid image. Only JPG, PNG, and WEBP are allowed.`;
     }
     if (file.size > MAX_FILE_SIZE) {
@@ -263,58 +188,43 @@ const SubmitAssignment = () => {
   };
 
   const handleSubmit = async () => {
-    // CRITICAL: Verify current user identity before upload
-    if (selectedImages.length === 0 || !user || !profile || !assignment || !currentUserId || !currentProfileId) {
-      toast.error('Please ensure you are logged in before submitting.');
-      return;
-    }
+    if (selectedImages.length === 0 || !user || !profile || !assignment) return;
 
     setUploading(true);
     try {
-      const uploadedPaths: string[] = [];
+      const uploadedUrls: string[] = [];
       const timestamp = Date.now();
 
-      // Upload all images in order - each file path is namespaced by USER ID
+      // Upload all images in order
       for (let i = 0; i < selectedImages.length; i++) {
         const img = selectedImages[i];
-        // CRITICAL: File path MUST include current user's ID to ensure isolation
-        // Always use .jpg since we normalize to JPEG
-        const filePath = `${currentUserId}/${assignment.id}/page_${i + 1}_${timestamp}.jpg`;
-
-        // Normalize image via canvas for mobile compatibility
-        // This converts any image to a reliable JPEG Blob, fixing:
-        // - Empty file.type on Android gallery picks
-        // - Unreliable MIME types on some mobile browsers
-        // - Raw File upload failures on certain devices
-        let uploadBlob: Blob;
-        try {
-          uploadBlob = await normalizeImageFile(img.file);
-        } catch (normErr) {
-          console.warn(`Image normalization failed for page ${i + 1}, using raw file:`, normErr);
-          uploadBlob = img.file;
-        }
+        const ext = img.file.name.split('.').pop() || 'jpg';
+        const fileName = `${user.id}/${assignment.id}/page_${i + 1}_${timestamp}.${ext}`;
 
         const { error: uploadError } = await supabase.storage
           .from('uploads')
-          .upload(filePath, uploadBlob, {
-            cacheControl: 'no-cache',
+          .upload(fileName, img.file, {
+            cacheControl: '3600',
             upsert: true,
-            contentType: 'image/jpeg',
           });
 
         if (uploadError) throw uploadError;
 
-        // Store the file path, not the public URL (since bucket is private)
-        uploadedPaths.push(filePath);
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('uploads')
+          .getPublicUrl(fileName);
+
+        uploadedUrls.push(publicUrl);
       }
 
       // Check if deadline passed
       const isLate = isPast(new Date(assignment.deadline));
 
-      // Base submission data - store file paths (not public URLs for private bucket)
+      // Base submission data
       const baseSubmission = {
-        file_url: uploadedPaths[0], // First path for backward compatibility
-        file_urls: uploadedPaths,   // All paths
+        file_url: uploadedUrls[0], // First image for backward compatibility
+        file_urls: uploadedUrls,
         file_type: 'image/jpeg', // All submissions are now images
         submitted_at: new Date().toISOString(),
         is_late: isLate,
@@ -332,17 +242,12 @@ const SubmitAssignment = () => {
 
       // Create or update submission
       if (existingSubmission) {
-        const { data: updatedRows, error } = await supabase
+        const { error } = await supabase
           .from('submissions')
           .update(baseSubmission)
-          .eq('id', existingSubmission.id)
-          .eq('student_profile_id', currentProfileId)
-          .select('id');
+          .eq('id', existingSubmission.id);
 
         if (error) throw error;
-        if (!updatedRows || updatedRows.length === 0) {
-          throw new Error('Failed to update submission. It may have already been graded.');
-        }
         submissionId = existingSubmission.id;
       } else {
         const { data: newSubmission, error } = await supabase
@@ -350,7 +255,7 @@ const SubmitAssignment = () => {
           .insert({
             ...baseSubmission,
             assignment_id: assignment.id,
-            student_profile_id: currentProfileId, // CRITICAL: Use verified profile ID
+            student_profile_id: profile.id,
           })
           .select('id')
           .single();
@@ -362,17 +267,16 @@ const SubmitAssignment = () => {
       // Show verification progress
       setVerifyingSubmissionId(submissionId);
       setShowProgress(true);
-      toast.success(`${uploadedPaths.length} page(s) submitted! AI verification started.`);
+      toast.success(`${uploadedUrls.length} page(s) submitted! AI verification started.`);
       
-      // Trigger AI handwriting verification with file paths
-      // CRITICAL: Pass current student's profile ID for isolated verification
+      // Trigger AI handwriting verification with all image URLs
       supabase.functions.invoke('verify-handwriting', {
         body: {
           submission_id: submissionId,
-          file_urls: uploadedPaths, // Pass paths, edge function handles signed URLs
+          file_urls: uploadedUrls,
           file_type: 'image/jpeg',
-          student_profile_id: currentProfileId, // CRITICAL: Must be current student only
-          page_count: uploadedPaths.length,
+          student_profile_id: profile.id,
+          page_count: uploadedUrls.length,
         },
       }).then(({ error }) => {
         if (error) {
@@ -621,7 +525,7 @@ const SubmitAssignment = () => {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                  accept=".jpg,.jpeg,.png,.webp"
                   multiple
                   onChange={handleFileSelect}
                   className="hidden"
@@ -644,7 +548,7 @@ const SubmitAssignment = () => {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+              accept=".jpg,.jpeg,.png,.webp"
               multiple
               onChange={handleFileSelect}
               className="hidden"

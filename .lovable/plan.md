@@ -1,74 +1,246 @@
 
-# Fix Plan: Handwriting Verification, Mobile Upload, and Preview Issues
+## Plan: Convert to Image-Only Multi-Page Handwriting Verification System
 
-## Root Cause Analysis
-
-After tracing through every code path and examining the actual database data, here are the **3 real root causes**:
-
-### Root Cause 1: AI Verification Uses CDN-Cached Old Handwriting Image
-The `verify-handwriting` edge function fetches the reference handwriting image from a **public URL** (`handwriting-samples` bucket is public). When a student re-uploads and retrains, the file at the same storage path (`userId/handwriting.jpg`) is replaced. However, the public URL is served through a CDN that **caches the old image**.
-
-- The `extract-handwriting-features` function adds `?t=timestamp` to bust cache -- so it trains on the NEW image correctly.
-- But `verify-handwriting` fetches `studentDetails.handwriting_url` which is the **raw public URL without any cache buster** -- so it compares assignments against the **OLD cached image**.
-
-This is why retraining appears to do nothing: the profile JSON is updated with new features, but verification still fetches the old image from CDN cache.
-
-**Fix:** In `verify-handwriting/index.ts`, add a cache-busting timestamp to the reference image URL before fetching, using the `handwriting_features_extracted_at` timestamp from the database. This ensures it always fetches the version that matches the trained profile.
-
-### Root Cause 2: Mobile Upload "Failed to Fetch"
-The `SubmitAssignment.tsx` upload uses `img.file.type` for the `contentType` header. On some Android mobile browsers, when images are selected from the gallery, `file.type` can be empty or unreliable (e.g., `""` or an unusual MIME type). Additionally, some mobile browsers may have issues uploading raw `File` objects to Supabase storage.
-
-**Fix:** 
-- Convert the selected File to a Blob via canvas (similar to what `StudentHandwriting.tsx` already does with `stripExifData`) to normalize the image format.
-- Use a robust content type detection fallback based on file extension, not just `file.type`.
-- Add explicit error handling that distinguishes network errors from permission errors for clearer user feedback on mobile.
-
-### Root Cause 3: Preview Not Working on Mobile
-The `FilePreviewDialog` calls the `resolve-submission-files` edge function to get signed URLs. On mobile, if the auth token isn't properly included or the request times out, the dialog shows no files. The underlying signed URL generation is correct, but the mobile browser may need longer timeouts or the dialog needs better error recovery.
-
-**Fix:** Add retry logic in the `FilePreviewDialog` when URL resolution fails, and ensure proper loading states on mobile.
+This plan replaces the current PDF/DOC-based verification with an **image-only, multi-page handwritten assignment verification system** while preserving all existing dashboards, database structure, and verification workflows.
 
 ---
 
-## Implementation Plan
+### Overview of Changes
 
-### Step 1: Fix `verify-handwriting` Edge Function (Cache Busting)
+| Area | Current State | Target State |
+|------|---------------|--------------|
+| Allowed formats | PDF, DOC, DOCX, TXT, images | **JPG, PNG, WEBP only** |
+| Files per submission | Single file | **Multiple images (one per page)** |
+| AI verification | Single file analysis | **Per-page analysis + aggregation** |
+| Storage | Single `file_url` | **Array of image URLs** |
 
-**File:** `supabase/functions/verify-handwriting/index.ts`
+---
 
-- Read `handwriting_features_extracted_at` alongside existing fields from `student_details`
-- When fetching the reference image, append `?t={extracted_at_timestamp}` to the URL to bypass CDN cache
-- This ensures the fetched reference image matches the trained profile
+### Phase 1: Database Schema Update
 
-### Step 2: Fix Mobile Upload in `SubmitAssignment.tsx`
+**New column in `submissions` table:**
 
-**File:** `src/pages/student/SubmitAssignment.tsx`
+```text
+file_urls (TEXT ARRAY) - Stores array of image URLs for multi-page submissions
+```
 
-- Add a `normalizeImageFile` helper function that converts a File to a JPEG Blob via canvas (same technique used in `StudentHandwriting.tsx` with `stripExifData`)
-- Before uploading each image, run it through this normalizer -- this guarantees a valid JPEG blob with correct content type on both desktop and mobile
-- Use the normalized blob for the storage upload with explicit `contentType: 'image/jpeg'`
-- Add a file-extension-based content type fallback for cases where the normalizer isn't needed
+The existing `file_url` column will be kept for backward compatibility but new submissions will use `file_urls`.
 
-### Step 3: Ensure Preview Works on Mobile
+**Migration SQL:**
+- Add `file_urls` column as `TEXT[]`
+- Add `page_verification_results` column as `JSONB` (stores per-page AI results)
 
-**File:** `src/components/faculty/FilePreviewDialog.tsx`
+---
 
-- Add retry logic (1 retry) when `resolve-submission-files` fails
-- Increase error visibility with specific mobile-friendly error messages
-- Ensure the dialog properly resets state when switching between submissions
+### Phase 2: Frontend - Submission Page Updates
 
-### Summary of Files Changed
+**File: `src/pages/student/SubmitAssignment.tsx`**
 
-| File | Change |
-|------|--------|
-| `supabase/functions/verify-handwriting/index.ts` | Add cache-busting to reference image fetch |
-| `src/pages/student/SubmitAssignment.tsx` | Normalize images via canvas before upload for mobile compatibility |
-| `src/components/faculty/FilePreviewDialog.tsx` | Add retry logic for signed URL resolution |
+Changes:
+1. **Remove PDF/DOC support** - Accept only `.jpg`, `.jpeg`, `.png`, `.webp`
+2. **Enable multi-file selection** - Allow multiple images via `multiple` attribute
+3. **Add image previews** - Show thumbnails of all selected pages before submission
+4. **Add page ordering** - Allow drag-to-reorder or numbered display
+5. **Update UI text** - "Upload handwritten assignment images (one image per page)"
+6. **Validate each file** - Reject non-image files with clear error message
+7. **Upload all images** - Store all to Supabase storage and save URLs array
 
-### What is NOT Changed
-- AI verification algorithms and thresholds (untouched)
-- Similarity scoring logic (untouched)
-- Data isolation code (already correct -- verified in database queries)
-- Backend decision rules (untouched)
-- `extract-handwriting-features` function (already works correctly)
-- `resolve-submission-files` function (already works correctly)
+**New UI structure:**
+```text
++---------------------------------------+
+| Upload Handwritten Assignment         |
+|                                       |
+| [Page 1]  [Page 2]  [Page 3]  [+Add]  |
+|  📄 img1   📄 img2   📄 img3          |
+|                                       |
+| "Upload images only (JPG, PNG, WEBP)" |
+| "One image per handwritten page"      |
+|                                       |
+| [Submit All Pages]                    |
++---------------------------------------+
+```
+
+---
+
+### Phase 3: Backend - Edge Function Updates
+
+**File: `supabase/functions/verify-handwriting/index.ts`**
+
+**Complete rewrite of verification logic:**
+
+1. **Accept array of file URLs** - New parameter `file_urls: string[]`
+2. **Remove PDF handling** - Delete all PDF MIME type logic
+3. **Per-page verification loop:**
+   ```text
+   For each image in file_urls:
+     1. Fetch image as base64
+     2. Check if it's handwritten (is_handwritten flag)
+     3. Compare against student's handwriting profile
+     4. Store page-level: { page_number, similarity_score, same_writer, is_handwritten }
+   ```
+
+4. **Conservative aggregation logic:**
+   ```text
+   overall_similarity = MIN(page_similarity_scores)
+   
+   If any page has same_writer = false → final = false
+   If any page has is_handwritten = false → flag for manual review
+   
+   Confidence increases only if ALL pages are consistent
+   ```
+
+5. **Updated AI prompt for images only:**
+   ```text
+   You are an AI handwriting verification engine.
+   This is an IMAGE of a handwritten document page.
+   Analyze ONLY handwriting features, not content.
+   
+   First, determine if this is handwritten or typed/printed.
+   If typed → is_handwritten = false, similarity_score = 0
+   
+   If handwritten, compare against the student's profile...
+   ```
+
+6. **Output structure:**
+   ```json
+   {
+     "overall_similarity_score": 72,
+     "same_writer": true,
+     "confidence_level": "high",
+     "risk_level": "low",
+     "page_results": [
+       { "page": 1, "similarity": 78, "same_writer": true, "is_handwritten": true },
+       { "page": 2, "similarity": 72, "same_writer": true, "is_handwritten": true }
+     ],
+     "final_reasoning": "..."
+   }
+   ```
+
+---
+
+### Phase 4: Update Verification Progress UI
+
+**File: `src/components/submission/VerificationProgress.tsx`**
+
+Changes:
+1. Show "Analyzing page X of Y..." during verification
+2. Display per-page results in the progress indicator
+3. Show final aggregated result
+
+---
+
+### Phase 5: Update Submissions Display
+
+**File: `src/pages/student/StudentSubmissions.tsx`**
+
+Changes:
+1. Show image gallery instead of single file link
+2. Display per-page verification scores in details dialog
+3. Update file preview to show all pages
+
+**File: `src/components/submission/VerificationDetailsDialog.tsx`**
+
+Changes:
+1. Add per-page results table showing each page's score
+2. Highlight any pages flagged as non-handwritten or different writer
+
+---
+
+### Phase 6: Update Faculty/Admin Views
+
+**Files:**
+- `src/pages/faculty/FacultySubmissions.tsx`
+- `src/pages/admin/AssignmentsPage.tsx`
+
+Changes:
+1. Show multi-image gallery for submissions
+2. Display per-page verification breakdown
+3. Allow clicking individual pages to view details
+
+---
+
+### Phase 7: Clean Up - Remove Document Logic
+
+**Remove from codebase:**
+1. PDF MIME type handling in `verify-handwriting`
+2. `application/pdf` detection code
+3. DOC/DOCX format references
+4. Any OCR or text extraction logic (none exists currently)
+5. PDF format badges in UI
+
+**Update `assignments` table default:**
+- Change `allowed_formats` default from `['pdf', 'doc', 'docx', 'image']` to `['image']`
+
+---
+
+### Technical Implementation Details
+
+**Storage structure for multi-page:**
+```text
+uploads/{user_id}/{assignment_id}/
+  ├── page_1_{timestamp}.jpg
+  ├── page_2_{timestamp}.jpg
+  └── page_3_{timestamp}.jpg
+```
+
+**Database submission row:**
+```json
+{
+  "file_url": "url_to_first_image",  // Backward compat
+  "file_urls": ["url_page_1", "url_page_2", "url_page_3"],
+  "file_type": "image/jpeg",
+  "ai_analysis_details": {
+    "algorithm_version": "4.0-image-only",
+    "page_count": 3,
+    "page_results": [...],
+    "overall_similarity_score": 72,
+    "aggregation_method": "conservative_minimum"
+  }
+}
+```
+
+**Verification decision rules:**
+```text
+If overall_score >= 75 AND all pages same_writer = true:
+  → status: "verified", risk_level: "low"
+
+If any page is_handwritten = false:
+  → status: "needs_manual_review", flag: "typed_content_detected"
+
+If overall_score < 50 OR any page clearly different writer:
+  → status: "needs_reupload", risk_level: "high"
+
+Otherwise (50-74 range):
+  → status: "needs_manual_review", risk_level: "medium"
+```
+
+---
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/pages/student/SubmitAssignment.tsx` | Multi-file upload, image preview, validation |
+| `supabase/functions/verify-handwriting/index.ts` | Per-page verification, aggregation logic |
+| `src/components/submission/VerificationProgress.tsx` | Per-page progress display |
+| `src/pages/student/StudentSubmissions.tsx` | Multi-image display |
+| `src/components/submission/VerificationDetailsDialog.tsx` | Per-page results table |
+| `src/pages/faculty/FacultySubmissions.tsx` | Multi-image gallery |
+| `src/components/faculty/FilePreviewDialog.tsx` | Image gallery support |
+
+**Database migration:**
+- Add `file_urls TEXT[]` column to `submissions`
+- Add `page_verification_results JSONB` column to `submissions`
+
+---
+
+### Benefits of This Approach
+
+1. **More stable** - Images are simpler than PDFs for AI analysis
+2. **More accurate** - Direct handwriting comparison without conversion
+3. **Deterministic** - Clear per-page scoring with minimum aggregation
+4. **No infinite loops** - Terminal states clearly defined
+5. **Real-world suitable** - Students photograph handwritten pages naturally
+
+
+also make the assignment pages submitted by the student to store in the database and send it to the submissions age of the faculty and when they hit the view button the assignment images uploaded by the student need to be visible to the faculty and also to the student 

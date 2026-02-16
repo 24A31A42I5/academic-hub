@@ -111,7 +111,7 @@ const HandwritingPage = () => {
       // Extract file path from URL
       const urlParts = student.handwriting_url.split('/handwriting-samples/');
       if (urlParts.length > 1) {
-        const filePath = urlParts[1].split('?')[0];
+        const filePath = urlParts[1];
         
         // Delete from storage
         const { error: storageError } = await supabase.storage
@@ -129,9 +129,6 @@ const HandwritingPage = () => {
         .update({
           handwriting_url: null,
           handwriting_submitted_at: null,
-          handwriting_image_hash: null,
-          handwriting_feature_embedding: null,
-          handwriting_features_extracted_at: null,
         })
         .eq('id', student.id);
 
@@ -442,7 +439,7 @@ const HandwritingPage = () => {
               {previewStudent.handwriting_url && (
                 <div className="border rounded-lg overflow-hidden">
                   <img
-                    src={`${previewStudent.handwriting_url}?v=${previewStudent.handwriting_submitted_at || Date.now()}`}
+                    src={previewStudent.handwriting_url}
                     alt="Handwriting sample"
                     className="w-full h-auto max-h-[60vh] object-contain bg-muted"
                   />

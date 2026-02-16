@@ -29,24 +29,18 @@ interface PageResult {
   confidence: string;
 }
 
-async function fetchImageAsBase64(urlOrPath: string, supabase: any, studentUserId?: string): Promise<{ base64: string; size: number }> {
-  console.log('Fetching image:', urlOrPath);
+async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64: string; size: number }> {
+  console.log('Fetching image:', url);
   
-  let url = urlOrPath;
-  
-  // If it's a path (not starting with http), generate a signed URL
-  if (!urlOrPath.startsWith('http')) {
-    console.log('Generating signed URL for path:', urlOrPath);
-    
-    // SECURITY: If studentUserId is provided, verify the path belongs to this student
-    if (studentUserId && !urlOrPath.startsWith(studentUserId + '/')) {
-      console.error('SECURITY: Path does not belong to student:', studentUserId, urlOrPath);
-      throw new Error('Access denied: file does not belong to this student');
-    }
+  // Check if this is a Supabase storage URL that needs a signed URL
+  const uploadsBucketMatch = url.match(/\/storage\/v1\/object\/public\/uploads\/(.+)$/);
+  if (uploadsBucketMatch) {
+    const filePath = uploadsBucketMatch[1];
+    console.log('Generating signed URL for private bucket, path:', filePath);
     
     const { data: signedData, error: signedError } = await supabase.storage
       .from('uploads')
-      .createSignedUrl(urlOrPath, 300); // 5 minute expiry
+      .createSignedUrl(filePath, 300); // 5 minute expiry
     
     if (signedError) {
       console.error('Error creating signed URL:', signedError);
@@ -54,33 +48,7 @@ async function fetchImageAsBase64(urlOrPath: string, supabase: any, studentUserI
     }
     
     url = signedData.signedUrl;
-    console.log('Using signed URL for path');
-  } else if (urlOrPath.includes('/storage/v1/object/public/uploads/')) {
-    // It's a public URL to a private bucket - extract path and sign it
-    const match = urlOrPath.match(/\/storage\/v1\/object\/public\/uploads\/(.+)/);
-    if (match) {
-      const filePath = match[1];
-      
-      // SECURITY: If studentUserId is provided, verify the path belongs to this student
-      if (studentUserId && !filePath.startsWith(studentUserId + '/')) {
-        console.error('SECURITY: Extracted path does not belong to student:', studentUserId, filePath);
-        throw new Error('Access denied: file does not belong to this student');
-      }
-      
-      console.log('Generating signed URL for extracted path');
-      
-      const { data: signedData, error: signedError } = await supabase.storage
-        .from('uploads')
-        .createSignedUrl(filePath, 300);
-      
-      if (signedError) {
-        console.error('Error creating signed URL:', signedError);
-        throw new Error(`Failed to access file: ${signedError.message}`);
-      }
-      
-      url = signedData.signedUrl;
-      console.log('Using signed URL');
-    }
+    console.log('Using signed URL');
   }
   
   const response = await fetch(url);
@@ -307,35 +275,16 @@ serve(async (req) => {
       throw new Error('No image URLs provided');
     }
 
-    if (!student_profile_id) {
-      throw new Error('Student profile ID is required for verification');
-    }
-
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // CRITICAL: Get student profile first to verify ownership and get user_id
-    const { data: studentProfile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, user_id')
-      .eq('id', student_profile_id)
-      .single();
-
-    if (profileError || !studentProfile) {
-      console.error('Error fetching student profile:', profileError);
-      throw new Error('Failed to verify student identity');
-    }
-
-    const studentUserId = studentProfile.user_id;
-    console.log('Verified student user_id:', studentUserId);
-
-    // CRITICAL: Get student's trained handwriting profile - STRICTLY for this student
+    // Get student's trained handwriting profile
     const { data: studentDetails, error: studentError } = await supabase
       .from('student_details')
-      .select('handwriting_feature_embedding, handwriting_url, roll_number, handwriting_features_extracted_at')
+      .select('handwriting_feature_embedding, handwriting_url, roll_number')
       .eq('profile_id', student_profile_id)
       .single();
 
@@ -379,31 +328,9 @@ serve(async (req) => {
       });
     }
 
-    // CRITICAL: Verify submission belongs to this student before processing
-    const { data: submissionCheck, error: submissionCheckError } = await supabase
-      .from('submissions')
-      .select('student_profile_id')
-      .eq('id', submission_id)
-      .single();
-
-    if (submissionCheckError || !submissionCheck) {
-      console.error('Error verifying submission ownership:', submissionCheckError);
-      throw new Error('Failed to verify submission ownership');
-    }
-
-    if (submissionCheck.student_profile_id !== student_profile_id) {
-      console.error('SECURITY: Submission does not belong to student profile:', student_profile_id);
-      throw new Error('Access denied: submission does not belong to this student');
-    }
-
-    // Fetch reference image with cache-busting to ensure we get the LATEST trained sample
-    // The CDN caches public URLs, so appending the extraction timestamp forces a fresh fetch
-    const cacheBuster = studentDetails.handwriting_features_extracted_at
-      ? `?t=${new Date(studentDetails.handwriting_features_extracted_at).getTime()}`
-      : `?t=${Date.now()}`;
-    const cacheBustedReferenceUrl = `${referenceImageUrl}${cacheBuster}`;
-    console.log('Fetching reference handwriting sample with cache buster:', cacheBuster);
-    const { base64: referenceBase64, size: refSize } = await fetchImageAsBase64(cacheBustedReferenceUrl, supabase);
+    // Fetch reference image
+    console.log('Fetching reference handwriting sample...');
+    const { base64: referenceBase64, size: refSize } = await fetchImageAsBase64(referenceImageUrl, supabase);
     console.log('Reference image size:', refSize, 'bytes');
 
     // Process each page
@@ -418,8 +345,7 @@ serve(async (req) => {
       console.log(`Processing page ${pageNum}/${imageUrls.length}...`);
 
       try {
-        // SECURITY: Pass studentUserId to verify file ownership
-        const { base64: pageBase64, size: pageSize } = await fetchImageAsBase64(pageUrl, supabase, studentUserId);
+        const { base64: pageBase64, size: pageSize } = await fetchImageAsBase64(pageUrl, supabase);
         console.log(`Page ${pageNum} size:`, pageSize, 'bytes');
 
         // Check if image is too large

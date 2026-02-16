@@ -203,8 +203,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     await supabase.auth.signOut();
     setProfile(null);
-    // Clear any user-specific cached data to prevent cross-user leakage
-    try { localStorage.clear(); } catch (_) { /* ignore */ }
   };
 
   return (

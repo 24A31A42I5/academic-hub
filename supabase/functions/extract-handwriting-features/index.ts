@@ -34,7 +34,7 @@ serve(async (req) => {
 
     console.log('=== GEMINI HANDWRITING TRAINING START ===');
     console.log('Student details ID:', student_details_id);
-    console.log('Image URL provided:', !!image_url);
+    console.log('Image URL:', image_url);
 
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY is not configured');
@@ -43,22 +43,6 @@ serve(async (req) => {
     if (!image_url || !student_details_id) {
       throw new Error('Missing required parameters: image_url and student_details_id');
     }
-
-    // CRITICAL: Verify student_details_id exists and fetch for validation
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    
-    const { data: studentDetails, error: detailsError } = await supabase
-      .from('student_details')
-      .select('id, profile_id')
-      .eq('id', student_details_id)
-      .single();
-
-    if (detailsError || !studentDetails) {
-      console.error('Error verifying student details:', detailsError);
-      throw new Error('Invalid student_details_id');
-    }
-
-    console.log('Verified student details for profile:', studentDetails.profile_id);
 
     // Fetch image as base64
     const imageBase64 = await fetchFileAsBase64(image_url);
@@ -211,22 +195,23 @@ RESPOND WITH ONLY THIS JSON (no markdown, no extra text):
 
     console.log('Handwriting profile created:', JSON.stringify(handwritingProfile, null, 2));
 
-    // Update student_details - STRICTLY for this student only
+    // Create Supabase client and update student_details
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
     const { error: updateError } = await supabase
       .from('student_details')
       .update({
         handwriting_feature_embedding: handwritingProfile,
         handwriting_features_extracted_at: new Date().toISOString(),
       })
-      .eq('id', student_details_id)
-      .eq('profile_id', studentDetails.profile_id); // CRITICAL: Double-check ownership
+      .eq('id', student_details_id);
 
     if (updateError) {
       console.error('Error updating student details:', updateError);
       throw new Error('Failed to save handwriting profile');
     }
 
-    console.log('=== GEMINI HANDWRITING TRAINING COMPLETE for profile:', studentDetails.profile_id);
+    console.log('=== GEMINI HANDWRITING TRAINING COMPLETE ===');
 
     return new Response(JSON.stringify({
       success: true,
