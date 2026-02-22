@@ -86,7 +86,10 @@ const BASELINE_MAP: Record<string, HandwritingProfile["baseline"]> = {
 const HEIGHT_MAP: Record<string, HandwritingProfile["height_ratio"]> = {
   "short": "short", "small": "short", "compact": "short", "low": "short",
   "moderate": "moderate", "medium": "moderate", "average": "moderate", "normal": "moderate",
-  "tall": "tall", "large": "tall", "high": "tall", "extended": "tall",
+  "tall": "tall", "large": "tall", "extended": "tall",
+  // Descriptive phrases
+  "approximately twice": "tall", "twice the height": "tall", "2x": "tall",
+  "1.5": "moderate", "proportional": "moderate",
 };
 
 const STYLE_MAP: Record<string, HandwritingProfile["writing_style"]> = {
@@ -95,13 +98,41 @@ const STYLE_MAP: Record<string, HandwritingProfile["writing_style"]> = {
   "mixed": "mixed", "hybrid": "mixed", "semi-cursive": "mixed", "partial": "mixed",
 };
 
+// Letter formation shape categories for deterministic comparison
+type LetterShape = "rounded" | "angular" | "looped" | "open" | "closed" | "simple" | "mixed";
+
+const LETTER_SHAPE_MAP: Record<string, LetterShape> = {
+  "rounded": "rounded", "round": "rounded", "oval": "rounded", "circular": "rounded", "curved": "rounded",
+  "angular": "angular", "sharp": "angular", "pointed": "angular", "straight": "angular",
+  "looped": "looped", "loop": "looped", "loopy": "looped",
+  "open": "open", "unclosed": "open", "gap": "open",
+  "closed": "closed", "sealed": "closed", "complete": "closed",
+  "simple": "simple", "basic": "simple", "plain": "simple", "minimal": "simple",
+  "mixed": "mixed", "hybrid": "mixed", "varied": "mixed",
+};
+
+function normalizeLetterShape(description: string | undefined | null): LetterShape {
+  if (!description || description === "unknown") return "simple";
+  const lower = description.toLowerCase();
+  // Priority order: check most distinctive shapes first
+  for (const [keyword, shape] of Object.entries(LETTER_SHAPE_MAP)) {
+    if (lower.includes(keyword)) return shape;
+  }
+  return "simple";
+}
+
 function mapEnum<T>(value: string | undefined | null, map: Record<string, T>): T | null {
   if (!value) return null;
   const key = String(value).toLowerCase().trim();
+  // Exact match first
   if (map[key]) return map[key];
-  // Partial match: check if any map key is contained in the value
-  for (const [k, v] of Object.entries(map)) {
-    if (key.includes(k)) return v;
+  // Multi-word key match (for phrases like "approximately twice")
+  // Check longest keys first to prioritize specific matches
+  const sortedEntries = Object.entries(map).sort((a, b) => b[0].length - a[0].length);
+  for (const [k, v] of sortedEntries) {
+    // Use word boundary check: the key must appear as a standalone word/phrase
+    const regex = new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (regex.test(key)) return v;
   }
   return null;
 }
@@ -136,15 +167,15 @@ function normalizeProfile(raw: any): HandwritingProfile | null {
       return null;
     }
 
-    // Extract letter formations
+    // Extract letter formations and normalize to shape categories
     const rawLetters = raw.letter_formation?.distinctive_letters ?? raw.distinctive_letters ?? raw.letter_formations ?? {};
     const letter_formations = {
-      a: String(rawLetters.a ?? rawLetters.A ?? "unknown"),
-      e: String(rawLetters.e ?? rawLetters.E ?? "unknown"),
-      g: String(rawLetters.g ?? rawLetters.G ?? "unknown"),
-      r: String(rawLetters.r ?? rawLetters.R ?? "unknown"),
-      t: String(rawLetters.t ?? rawLetters.T ?? "unknown"),
-      s: String(rawLetters.s ?? rawLetters.S ?? "unknown"),
+      a: normalizeLetterShape(rawLetters.a ?? rawLetters.A),
+      e: normalizeLetterShape(rawLetters.e ?? rawLetters.E),
+      g: normalizeLetterShape(rawLetters.g ?? rawLetters.G),
+      r: normalizeLetterShape(rawLetters.r ?? rawLetters.R),
+      t: normalizeLetterShape(rawLetters.t ?? rawLetters.T),
+      s: normalizeLetterShape(rawLetters.s ?? rawLetters.S),
     };
 
     const confidence_level = typeof rawConfidence === 'number' ? Math.max(0, Math.min(1, rawConfidence)) : 0.5;
@@ -202,7 +233,7 @@ Return ONLY this JSON (no markdown, no extra text):
     "overall_style": "<angular/rounded/mixed>",
     "lowercase_characteristics": "<detailed stylometric description>",
     "uppercase_characteristics": "<detailed stylometric description>",
-    "distinctive_letters": {"a": "<formation>", "e": "<formation>", "g": "<formation>", "r": "<formation>", "t": "<formation>", "s": "<formation>"}
+    "distinctive_letters": {"a": "<rounded/angular/looped/open/closed/simple/mixed>", "e": "<rounded/angular/looped/open/closed/simple/mixed>", "g": "<rounded/angular/looped/open/closed/simple/mixed>", "r": "<rounded/angular/looped/open/closed/simple/mixed>", "t": "<rounded/angular/looped/open/closed/simple/mixed>", "s": "<rounded/angular/looped/open/closed/simple/mixed>"}
   },
   "spacing": {
     "letter_spacing": "<cramped/normal/wide>",
