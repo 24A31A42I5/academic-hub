@@ -13,34 +13,34 @@ import { passwordSchema, emailSchema, fullNameSchema } from '@/lib/validation';
 
 const loginSchema = z.object({
   email: emailSchema,
-  password: z.string().min(1, 'Password is required'),
+  password: z.string().min(1, 'Password is required')
 });
 
 const studentSchema = z.object({
   fullName: fullNameSchema,
   email: emailSchema,
   password: passwordSchema,
-  phoneNumber: z
-    .string()
-    .min(10, 'Phone number is required')
-    .max(15, 'Phone number is too long'),
+  phoneNumber: z.
+  string().
+  min(10, 'Phone number is required').
+  max(15, 'Phone number is too long'),
   rollNumber: z.string().min(1, 'Roll number is required'),
   year: z.string().min(1, 'Year is required'),
   branch: z.string().min(1, 'Branch is required'),
-  section: z.string().min(1, 'Section is required'),
+  section: z.string().min(1, 'Section is required')
 });
 
 const facultySchema = z.object({
   fullName: fullNameSchema,
   email: emailSchema,
   password: passwordSchema,
-  facultyId: z.string().min(1, 'Faculty ID is required'),
+  facultyId: z.string().min(1, 'Faculty ID is required')
 });
 
 const adminSchema = z.object({
   fullName: fullNameSchema,
   email: emailSchema,
-  password: passwordSchema,
+  password: passwordSchema
 });
 
 type Role = 'admin' | 'faculty' | 'student';
@@ -66,7 +66,7 @@ const Auth = () => {
     year: '',
     branch: '',
     section: '',
-    facultyId: '',
+    facultyId: ''
   });
 
   const { signIn, signUp, user, profile, loading: authLoading } = useAuth();
@@ -96,8 +96,8 @@ const Auth = () => {
   };
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    setErrors(prev => ({ ...prev, [field]: '' }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    setErrors((prev) => ({ ...prev, [field]: '' }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -110,7 +110,7 @@ const Auth = () => {
         const result = loginSchema.safeParse(formData);
         if (!result.success) {
           const newErrors: Record<string, string> = {};
-          result.error.errors.forEach(err => {
+          result.error.errors.forEach((err) => {
             newErrors[err.path[0]] = err.message;
           });
           setErrors(newErrors);
@@ -122,10 +122,10 @@ const Auth = () => {
         if (error) {
           toast({
             title: 'Login Failed',
-            description: error.message === 'Invalid login credentials' 
-              ? 'Invalid email or password. Please check your credentials.' 
-              : error.message,
-            variant: 'destructive',
+            description: error.message === 'Invalid login credentials' ?
+            'Invalid email or password. Please check your credentials.' :
+            error.message,
+            variant: 'destructive'
           });
         } else {
           toast({ title: 'Welcome back!', description: 'Successfully logged in.' });
@@ -142,7 +142,7 @@ const Auth = () => {
 
         if (!validationResult.success) {
           const newErrors: Record<string, string> = {};
-          validationResult.error.errors.forEach(err => {
+          validationResult.error.errors.forEach((err) => {
             newErrors[err.path[0]] = err.message;
           });
           setErrors(newErrors);
@@ -150,32 +150,32 @@ const Auth = () => {
           return;
         }
 
-        const additionalData = role === 'student' 
-          ? { 
-              phoneNumber: formData.phoneNumber,
-              rollNumber: formData.rollNumber, 
-              year: parseInt(formData.year), 
-              branch: formData.branch, 
-              section: formData.section 
-            }
-          : role === 'faculty' 
-            ? { facultyId: formData.facultyId }
-            : undefined;
+        const additionalData = role === 'student' ?
+        {
+          phoneNumber: formData.phoneNumber,
+          rollNumber: formData.rollNumber,
+          year: parseInt(formData.year),
+          branch: formData.branch,
+          section: formData.section
+        } :
+        role === 'faculty' ?
+        { facultyId: formData.facultyId } :
+        undefined;
 
         const { error } = await signUp(formData.email, formData.password, formData.fullName, role, additionalData);
-        
+
         if (error) {
           if (error.message?.includes('already registered')) {
             toast({
               title: 'Account Exists',
               description: 'This email is already registered. Please sign in instead.',
-              variant: 'destructive',
+              variant: 'destructive'
             });
           } else {
             toast({
               title: 'Registration Failed',
               description: error.message || 'An error occurred during registration.',
-              variant: 'destructive',
+              variant: 'destructive'
             });
           }
         } else {
@@ -186,7 +186,7 @@ const Auth = () => {
       toast({
         title: 'Error',
         description: 'An unexpected error occurred. Please try again.',
-        variant: 'destructive',
+        variant: 'destructive'
       });
     } finally {
       setLoading(false);
@@ -196,15 +196,15 @@ const Auth = () => {
   const roleColors = {
     admin: 'border-admin bg-admin-muted',
     faculty: 'border-faculty bg-faculty-muted',
-    student: 'border-student bg-student-muted',
+    student: 'border-student bg-student-muted'
   };
 
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
+      </div>);
+
   }
 
   return (
@@ -217,7 +217,9 @@ const Auth = () => {
           <div className="w-20 h-20 rounded-2xl bg-primary-foreground/20 backdrop-blur-sm flex items-center justify-center mb-8">
             <Shield className="w-12 h-12" />
           </div>
-          <h1 className="text-4xl font-bold mb-4 text-center">AcademiGuard</h1>
+          <h1 className="text-4xl font-bold mb-4 text-center">Academic Hub
+
+          </h1>
           <p className="text-xl text-primary-foreground/80 text-center max-w-md">
             AI-Powered Academic Integrity Management System
           </p>
@@ -261,34 +263,32 @@ const Auth = () => {
                 {mode === 'login' ? 'Welcome Back' : 'Create Account'}
               </CardTitle>
               <CardDescription>
-                {mode === 'login' 
-                  ? 'Sign in to access your dashboard' 
-                  : 'Register to get started with AcademiGuard'}
+                {mode === 'login' ? 'Sign in to access your dashboard' : 'Register to get started with AcademiGuard'}
               </CardDescription>
             </CardHeader>
 
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
-                {mode === 'register' && (
-                  <>
+                {mode === 'register' &&
+                <>
                     {/* Role Selection */}
                     <div className="space-y-2">
                       <Label>Select Your Role</Label>
                       <div className="grid grid-cols-3 gap-2">
-                        {(['admin', 'faculty', 'student'] as Role[]).map((r) => (
-                          <button
-                            key={r}
-                            type="button"
-                            onClick={() => setRole(r)}
-                            className={`p-3 rounded-lg border-2 transition-all ${
-                              role === r 
-                                ? roleColors[r] + ' border-2' 
-                                : 'border-border hover:border-muted-foreground/50'
-                            }`}
-                          >
+                        {(['admin', 'faculty', 'student'] as Role[]).map((r) =>
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setRole(r)}
+                        className={`p-3 rounded-lg border-2 transition-all ${
+                        role === r ?
+                        roleColors[r] + ' border-2' :
+                        'border-border hover:border-muted-foreground/50'}`
+                        }>
+
                             <span className="capitalize font-medium">{r}</span>
                           </button>
-                        ))}
+                      )}
                       </div>
                     </div>
 
@@ -296,16 +296,16 @@ const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="fullName">Full Name</Label>
                       <Input
-                        id="fullName"
-                        value={formData.fullName}
-                        onChange={(e) => handleInputChange('fullName', e.target.value)}
-                        placeholder="Enter your full name"
-                        className={errors.fullName ? 'border-destructive' : ''}
-                      />
+                      id="fullName"
+                      value={formData.fullName}
+                      onChange={(e) => handleInputChange('fullName', e.target.value)}
+                      placeholder="Enter your full name"
+                      className={errors.fullName ? 'border-destructive' : ''} />
+
                       {errors.fullName && <p className="text-sm text-destructive">{errors.fullName}</p>}
                     </div>
                   </>
-                )}
+                }
 
                 {/* Email */}
                 <div className="space-y-2">
@@ -316,8 +316,8 @@ const Auth = () => {
                     value={formData.email}
                     onChange={(e) => handleInputChange('email', e.target.value)}
                     placeholder="Enter your email"
-                    className={errors.email ? 'border-destructive' : ''}
-                  />
+                    className={errors.email ? 'border-destructive' : ''} />
+
                   {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
                 </div>
 
@@ -330,24 +330,24 @@ const Auth = () => {
                     value={formData.password}
                     onChange={(e) => handleInputChange('password', e.target.value)}
                     placeholder="Enter your password"
-                    className={errors.password ? 'border-destructive' : ''}
-                  />
+                    className={errors.password ? 'border-destructive' : ''} />
+
                   {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
                 </div>
 
                 {/* Student Fields */}
-                {mode === 'register' && role === 'student' && (
-                  <>
+                {mode === 'register' && role === 'student' &&
+                <>
                     <div className="space-y-2">
                       <Label htmlFor="phoneNumber">Mobile Number</Label>
                       <Input
-                        id="phoneNumber"
-                        inputMode="tel"
-                        value={formData.phoneNumber}
-                        onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
-                        placeholder="Enter your mobile number"
-                        className={errors.phoneNumber ? 'border-destructive' : ''}
-                      />
+                      id="phoneNumber"
+                      inputMode="tel"
+                      value={formData.phoneNumber}
+                      onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
+                      placeholder="Enter your mobile number"
+                      className={errors.phoneNumber ? 'border-destructive' : ''} />
+
                       {errors.phoneNumber && <p className="text-sm text-destructive">{errors.phoneNumber}</p>}
                       <p className="text-xs text-muted-foreground">
                         Used for SMS notifications (assignments & reminders).
@@ -357,12 +357,12 @@ const Auth = () => {
                     <div className="space-y-2">
                       <Label htmlFor="rollNumber">Roll Number</Label>
                       <Input
-                        id="rollNumber"
-                        value={formData.rollNumber}
-                        onChange={(e) => handleInputChange('rollNumber', e.target.value)}
-                        placeholder="Enter your roll number"
-                        className={errors.rollNumber ? 'border-destructive' : ''}
-                      />
+                      id="rollNumber"
+                      value={formData.rollNumber}
+                      onChange={(e) => handleInputChange('rollNumber', e.target.value)}
+                      placeholder="Enter your roll number"
+                      className={errors.rollNumber ? 'border-destructive' : ''} />
+
                       {errors.rollNumber && <p className="text-sm text-destructive">{errors.rollNumber}</p>}
                     </div>
 
@@ -374,9 +374,9 @@ const Auth = () => {
                             <SelectValue placeholder="Year" />
                           </SelectTrigger>
                           <SelectContent>
-                            {years.map(y => (
-                              <SelectItem key={y} value={y}>{y}</SelectItem>
-                            ))}
+                            {years.map((y) =>
+                          <SelectItem key={y} value={y}>{y}</SelectItem>
+                          )}
                           </SelectContent>
                         </Select>
                       </div>
@@ -388,9 +388,9 @@ const Auth = () => {
                             <SelectValue placeholder="Branch" />
                           </SelectTrigger>
                           <SelectContent>
-                            {branches.map(b => (
-                              <SelectItem key={b} value={b}>{b}</SelectItem>
-                            ))}
+                            {branches.map((b) =>
+                          <SelectItem key={b} value={b}>{b}</SelectItem>
+                          )}
                           </SelectContent>
                         </Select>
                       </div>
@@ -402,79 +402,79 @@ const Auth = () => {
                             <SelectValue placeholder="Sec" />
                           </SelectTrigger>
                           <SelectContent>
-                            {sections.map(s => (
-                              <SelectItem key={s} value={s}>{s}</SelectItem>
-                            ))}
+                            {sections.map((s) =>
+                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                          )}
                           </SelectContent>
                         </Select>
                       </div>
                     </div>
                   </>
-                )}
+                }
 
                 {/* Faculty Fields */}
-                {mode === 'register' && role === 'faculty' && (
-                  <div className="space-y-2">
+                {mode === 'register' && role === 'faculty' &&
+                <div className="space-y-2">
                     <Label htmlFor="facultyId">Faculty ID</Label>
                     <Input
-                      id="facultyId"
-                      value={formData.facultyId}
-                      onChange={(e) => handleInputChange('facultyId', e.target.value)}
-                      placeholder="Enter your faculty ID"
-                      className={errors.facultyId ? 'border-destructive' : ''}
-                    />
+                    id="facultyId"
+                    value={formData.facultyId}
+                    onChange={(e) => handleInputChange('facultyId', e.target.value)}
+                    placeholder="Enter your faculty ID"
+                    className={errors.facultyId ? 'border-destructive' : ''} />
+
                     {errors.facultyId && <p className="text-sm text-destructive">{errors.facultyId}</p>}
                   </div>
-                )}
+                }
 
                 <Button
                   type="submit"
                   className="w-full"
                   variant={role === 'admin' ? 'admin' : role === 'faculty' ? 'faculty' : 'student'}
                   size="lg"
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : mode === 'login' ? (
-                    'Sign In'
-                  ) : (
-                    'Create Account'
-                  )}
+                  disabled={loading}>
+
+                  {loading ?
+                  <Loader2 className="w-4 h-4 animate-spin" /> :
+                  mode === 'login' ?
+                  'Sign In' :
+
+                  'Create Account'
+                  }
                 </Button>
 
                 <div className="text-center text-sm text-muted-foreground">
-                  {mode === 'login' ? (
-                    <>
+                  {mode === 'login' ?
+                  <>
                       Don't have an account?{' '}
                       <button
-                        type="button"
-                        onClick={() => setMode('register')}
-                        className="text-primary hover:underline font-medium"
-                      >
+                      type="button"
+                      onClick={() => setMode('register')}
+                      className="text-primary hover:underline font-medium">
+
                         Sign Up
                       </button>
-                    </>
-                  ) : (
-                    <>
+                    </> :
+
+                  <>
                       Already have an account?{' '}
                       <button
-                        type="button"
-                        onClick={() => setMode('login')}
-                        className="text-primary hover:underline font-medium"
-                      >
+                      type="button"
+                      onClick={() => setMode('login')}
+                      className="text-primary hover:underline font-medium">
+
                         Sign In
                       </button>
                     </>
-                  )}
+                  }
                 </div>
               </form>
             </CardContent>
           </Card>
         </div>
       </div>
-    </div>
-  );
+    </div>);
+
 };
 
 export default Auth;
