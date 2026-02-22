@@ -1,347 +1,150 @@
-&nbsp;
+## Two-Stage Deterministic Writer Verification
+
+Replace the current AI-scored verification (reference image + submission image sent to Gemini for a score) with a deterministic two-stage pipeline where AI only extracts features and code computes the score mathematically.
 
 ---
 
-# 🚨 FINAL MASTER FIX PROMPT — Forensic Stylometric Writer Identification System
+### What Changes
 
-## 🎯 Objective
+**File:** `supabase/functions/verify-handwriting/index.ts`
 
-Convert the handwriting verification pipeline from **image similarity comparison** into **true forensic stylometric writer identification**, while preserving all existing scoring logic, thresholds, aggregation, database behavior, and frontend functionality.
-
-Only the specified prompts and minimal supporting fixes are allowed.
+Only this file is modified. No other files change.
 
 ---
 
-# ⚠️ ABSOLUTE CONSTRAINTS — DO NOT MODIFY
+### Stage 1 -- Feature Extraction per Submission Page (NEW)
 
-Do NOT change:
+For each submission page image, call Gemini with the **same forensic extraction prompt** already used in `extract-handwriting-features/index.ts` to produce a structured profile. Then **normalize** the AI output into a strict enum-based schema:
+
+```text
+HandwritingProfile {
+  slant: "left_lean" | "right_lean" | "upright"
+  stroke_weight: "thin" | "medium" | "thick"
+  letter_spacing: "tight" | "normal" | "wide"
+  word_spacing: "tight" | "normal" | "wide"
+  baseline: "straight" | "wavy" | "variable"
+  height_ratio: "short" | "moderate" | "tall"
+  writing_style: "cursive" | "print" | "mixed"
+  letter_formations: { a, e, g, r, t, s } (string each)
+  confidence_level: number (0-1)
+}
+```
+
+A new `normalizeProfile()` function maps the free-text AI output fields to the strict enum values above. If any required field is missing or unmappable, the profile is `null` and the page gets a fallback score of 50.
+
+A new `extractPageFeatures()` function replaces the old `verifyPage()`. It sends **only the submission image** to Gemini (no reference image), gets the structured profile JSON back, and normalizes it.
+
+The same normalization is applied to the student's stored `handwriting_feature_embedding` (reference profile) at the start of the request.
+
+---
+
+### Stage 2 -- Deterministic Comparison (NEW)
+
+A new `compareProfiles(ref, sub)` function computes a score from 0-100 using exact enum matching:
+
+
+| Feature                               | Points  |
+| ------------------------------------- | ------- |
+| Slant                                 | 15      |
+| Stroke Weight                         | 10      |
+| Letter Spacing                        | 15      |
+| Letter Formations (6 letters x 5 pts) | 30      |
+| Baseline                              | 10      |
+| Height Ratio                          | 10      |
+| Writing Style                         | 10      |
+| **Total**                             | **100** |
+
+
+Each feature: exact match = full points, mismatch = 0.
+
+Output:
+
+- `similarity_score`: sum of matched points
+- `same_writer`: score >= 70
+- `confidence_level`: average of ref and sub confidence
+- `key_observations`: list of matched and mismatched feature names
+
+---
+
+### What Gets Removed
+
+- The `verifyPage()` function (lines 173-287) -- this is the function that sends two images to Gemini for comparison scoring. It is deleted entirely.
+- No reference image is fetched anymore (the `referenceBase64` fetch on line 398 is removed). Only the stored structured profile is used.
+
+---
+
+### What Stays Unchanged
+
+Everything else in the file remains identical:
 
 - `VERIFICATION_THRESHOLDS`
-- `determineRiskLevel`
-- `determineStatus`
-- `getFallbackResult`
-- conservative minimum aggregation across pages
-- ownership verification block
-- CDN cache-busting logic
-- `fetchImageAsBase64`
-- scoring math
-- risk mapping
-- database update logic
-- database schema
-- frontend code
-- other edge functions
+- `determineRiskLevel()`
+- `determineStatus()`
+- `getFallbackResult()`
+- `fetchImageAsBase64()` (still used for submission pages)
+- `corsHeaders`
+- Ownership verification block (lines 318-341)
+- CDN cache-busting logic (lines 391-394, though reference image fetch is no longer needed)
+- MIN aggregation (line 464)
+- Database update logic (lines 503-533)
+- Response format (lines 542-553)
+- Error handling (lines 555-564)
+- `PageResult` interface
 
 ---
 
-# ✅ ALLOWED MODIFICATIONS (ONLY THESE)
+### Typed Content Detection
 
-- Update prompt strings in the two specified edge functions.
-- Remove module-level caches or shared variables.
-- Remove stale embedding early-return logic.
-- Update CORS headers in one file.
-- Ensure feature/profile queries are filtered by authenticated `student_id`.
-- Redeploy edge functions.
-
-Do NOT add new helper functions or abstractions.
-
-Do NOT introduce image hashing, pixel comparison, or visual similarity logic.
+Currently handled inside Gemini's verification prompt. In the new flow, the extraction prompt already asks if content is handwritten. The normalization step will check for a `is_handwritten` field in the AI response. If the AI indicates typed/printed content, the page result is flagged with `is_handwritten: false` and `similarity: 0`.
 
 ---
 
-# 🔎 PRE-FIX AUDIT (MANDATORY BEFORE CHANGES)
+### Updated Page Processing Loop
 
-In BOTH files below:
-
-- `supabase/functions/extract-handwriting-features/index.ts`
-- `supabase/functions/verify-handwriting/index.ts`
-
-Check for any module-level variables outside the request handler:
-
-Examples:
-
-- caches
-- singleton objects
-- stored profile references
-- persistent state between requests
-
-If found:
-
-➡️ Move them inside the request handler so each request is isolated.
-
-Purpose: prevent cross-user contamination.
-
----
-
-# 🧩 FIX 1 — Stylometric Feature Extraction Prompt
-
-## File
-
-```
-supabase/functions/extract-handwriting-features/index.ts
-
+```text
+for each page:
+  1. Fetch image as base64
+  2. If too large -> fallback (score 50), continue
+  3. Call extractPageFeatures(image) -> normalized profile or null
+  4. If null -> fallback (score 50), continue
+  5. If not handwritten -> score 0, is_handwritten=false
+  6. Call compareProfiles(referenceProfile, submissionProfile) -> deterministic score
+  7. Push result
 ```
 
-Replace the existing AI prompt completely.
-
-### New Prompt Requirements
-
-Tell the model:
-
-- It is a **forensic document examiner** creating a biometric writer profile.
-- This is NOT:
-  - image description
-  - transcription
-  - layout analysis
-  - visual similarity measurement.
-
-Ignore completely:
-
-- words and meaning
-- topic/content
-- page layout
-- image quality
-- background texture
-- ink color
-- visual noise.
-
-Extract ONLY stylometric features:
-
-1. letter slant angle & consistency
-2. stroke width (thin / medium / thick)
-3. pen pressure patterns
-4. letter spacing (cramped / normal / wide)
-5. word spacing (tight / normal / wide)
-6. baseline consistency/drift
-7. uppercase-to-lowercase height ratio
-8. loop formations (l, h, b, d, f, g, y)
-9. letter connection style
-10. distinctive formation of at least five letters:
-
-- a, e, g, o, r, s, d, b, f, l, h
-
-11. writing rhythm and consistency.
-
-### Output Requirements
-
-Return JSON with EXACTLY these keys:
-
-- `letter_formation`
-- `spacing`
-- `stroke_characteristics`
-- `slant_and_baseline`
-- `unique_identifiers`
-- `overall_description`
-- `confidence_level`
-
-No additional keys.
-
-`overall_description` = 2–3 sentence stylometric signature summary.  
-`confidence_level` = decimal 0–1.
-
-This output becomes the permanent biometric writer profile.
+Everything after the loop (aggregation, status, DB update, response) stays identical.
 
 ---
 
-# 🧩 FIX 2 — Forensic Writer Identification Prompt
+### Algorithm Version
 
-## File
-
-```
-supabase/functions/verify-handwriting/index.ts
-
-```
-
-Inside `verifyPage`, replace the prompt string entirely.
-
-### New Prompt Requirements
-
-Tell the model:
-
-- It is a **forensic handwriting analyst** for an academic integrity system.
-- This is biometric writer identification.
-- NOT image comparison.
-- NOT content matching.
-
-Ignore completely:
-
-- words written
-- text similarity
-- image similarity
-- layout
-- background texture
-- image quality
-- ink color
-- whether images appear identical.
-
-Even if images look identical → analyze stylometric features only.
-
-Core principle:
-
-- Same writer = consistent stylometric features across different pages.
-- Different writers = inconsistent features even with similar content.
-
-Compare ONLY:
-
-1. letter slant consistency
-2. stroke weight & pressure
-3. letter spacing
-4. word spacing
-5. baseline behavior
-6. loop formations
-7. specific letter formations (a, e, g, o, r, s)
-8. connection style
-9. writing rhythm and density
-10. uppercase/lowercase proportions.
-
-### Required JSON Output (unchanged format)
-
-- `same_writer` (boolean)
-- `similarity_score` (integer 0–100)
-- `confidence` (0–1)
-- `reasoning` (2–3 sentences, stylometric features only)
-- `typed_content_detected` (boolean)
-
-Rules:
-
-- Score reflects ONLY stylometric matching.
-- Score 100 requires multiple distinctive feature matches.
-- Score 100 is NEVER justified by image or content similarity.
-- Reasoning MUST mention handwriting features.
-- Reasoning MUST NOT mention visual similarity.
+Updated from `'4.0-image-only'` to `'5.0-deterministic'` in `ai_analysis_details` for traceability.
 
 ---
 
-# 🧩 FIX 3 — Embedding Refresh on Every Upload
+### Summary of New Functions Added
 
-## File
+1. `normalizeProfile(rawProfile)` -- maps AI output to strict enum schema
+2. `extractPageFeatures(pageNumber, imageBase64, apiKey)` -- calls Gemini for feature extraction on a single submission page
+3. `compareProfiles(ref, sub)` -- deterministic point-based scoring
 
-```
-supabase/functions/extract-handwriting-features/index.ts
+### Functions Removed
 
-```
+1. `verifyPage()` -- the old AI-comparison function
 
-Remove any logic that:
+### Net Result
 
-- checks if embeddings already exist
-- skips extraction if profile exists
-- returns cached features.
-
-Requirements:
-
-- Always run full feature extraction.
-- Overwrite existing embeddings.
-- Update `handwriting_features_extracted_at` every time.
-- Never early-return existing data.
-
----
-
-# 🧩 FIX 4 — CORS Headers Consistency
-
-## File
-
-```
-supabase/functions/extract-handwriting-features/index.ts
-
-```
-
-Update `corsHeaders`:
-
-Add:
-
-- `x-client-info`
-- `x-supabase-client-platform`
-
-No other changes.
-
----
-
-# 🚀 FIX 5 — Redeploy (MANDATORY)
-
-After changes:
-
-Redeploy BOTH edge functions.
-
-Deployment drift must be avoided.
-
-Verify deployment by checking edge function logs and confirming stylometric prompt language appears during first invocation.
-
----
-
-# 🧹 POST-DEPLOY DATABASE CLEANUP (MANDATORY)
-
-Old embeddings were generated using image-based prompts and must be invalidated.
-
-Run SQL:
-
-```sql
-update student_details
-set handwriting_feature_embedding = null,
-    handwriting_features_extracted_at = null;
-
-```
-
-This forces retraining with new stylometric profiles.
-
----
-
-# 🧪 VERIFICATION TESTS
-
-## Test 1 — Same Writer, Different Page
-
-- Train with sample A.
-- Submit different page with different content.
-
-Expected:
-
-- Score > 70
-- Reasoning references stylometric features.
-
----
-
-## Test 2 — Different Writer
-
-Expected:
-
-- Score < 50
-- Reasoning identifies inconsistent stylometric features.
-
----
-
-## Test 3 — Identical Image
-
-Expected:
-
-- High score possible.
-- Reasoning MUST mention handwriting features.
-- Reasoning MUST NOT mention image similarity.
-
----
-
-## Test 4 — Deployment Confirmation
-
-Check logs after first invocation.
-
-If logs reference image comparison → redeploy failed.
-
----
-
-# 🎯 EXPECTED FINAL RESULT
-
-The system must now behave as:
-
-```
-Each student = independent forensic handwriting profile
-
-```
-
-with:
-
-- stylometric writer identification
-- no image matching bias
-- fresh embeddings on every upload
-- no cross-user contamination
-- stable verification across different pages.
-
----
-
-&nbsp;
+- AI is used **only** for feature extraction (converting image to structured data)
+- Scoring is **purely mathematical** -- same inputs always produce same score
+- No images are compared against each other by the AI
+- Reference image is never fetched -- only the stored structured profile is used
+- Deterministic, debuggable, reproducible results  
+  
+**IN SIMPLE WAY:**  
+Replace AI image-to-image verification with a two-stage deterministic pipeline:
+  1. Extract structured enum-based stylometric profiles from each submission page using Gemini.
+  2. Normalize and validate profiles.
+  3. Compare reference profile and submission profile using strict enum equality scoring.
+  4. Remove verifyPage() completely.
+  5. Keep thresholds, aggregation, and DB logic unchanged.
+  6. Update algorithm version to 5.0-deterministic.
