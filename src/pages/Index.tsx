@@ -4,34 +4,34 @@ import { Shield, GraduationCap, Users, Brain, CheckCircle, ArrowRight } from 'lu
 
 const Index = () => {
   const features = [
-    {
-      icon: Shield,
-      title: 'AI-Powered Fraud Detection',
-      description: 'Advanced algorithms detect plagiarism, copied content, and handwriting fraud in real-time.'
-    },
-    {
-      icon: GraduationCap,
-      title: 'Role-Based Dashboards',
-      description: 'Tailored experiences for administrators, faculty, and students with intuitive interfaces.'
-    },
-    {
-      icon: Users,
-      title: 'Section Management',
-      description: 'Easily assign faculty to sections and manage student groups across departments.'
-    },
-    {
-      icon: Brain,
-      title: 'Smart Analytics',
-      description: 'Comprehensive insights into academic performance and integrity metrics.'
-    }
-  ];
+  {
+    icon: Shield,
+    title: 'AI-Powered Fraud Detection',
+    description: 'Advanced algorithms detect plagiarism, copied content, and handwriting fraud in real-time.'
+  },
+  {
+    icon: GraduationCap,
+    title: 'Role-Based Dashboards',
+    description: 'Tailored experiences for administrators, faculty, and students with intuitive interfaces.'
+  },
+  {
+    icon: Users,
+    title: 'Section Management',
+    description: 'Easily assign faculty to sections and manage student groups across departments.'
+  },
+  {
+    icon: Brain,
+    title: 'Smart Analytics',
+    description: 'Comprehensive insights into academic performance and integrity metrics.'
+  }];
+
 
   const stats = [
-    { value: '99.9%', label: 'Detection Accuracy' },
-    { value: '50K+', label: 'Assignments Processed' },
-    { value: '1000+', label: 'Institutions Trust Us' },
-    { value: '24/7', label: 'Real-time Monitoring' }
-  ];
+  { value: '99.9%', label: 'Detection Accuracy' },
+  { value: '50K+', label: 'Assignments Processed' },
+  { value: '1000+', label: 'Institutions Trust Us' },
+  { value: '24/7', label: 'Real-time Monitoring' }];
+
 
   return (
     <div className="min-h-screen bg-background">
@@ -42,7 +42,7 @@ const Index = () => {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-faculty flex items-center justify-center">
               <Shield className="w-6 h-6 text-primary-foreground" />
             </div>
-            <span className="text-xl font-bold">AcademiGuard</span>
+            <span className="text-xl font-bold">Academic Hub</span>
           </div>
           <nav className="hidden md:flex items-center gap-8">
             <a href="#features" className="text-muted-foreground hover:text-foreground transition-colors">Features</a>
@@ -111,19 +111,19 @@ const Index = () => {
           </div>
           
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {features.map((feature, index) => (
-              <div 
-                key={feature.title}
-                className="glass-card p-6 rounded-2xl hover-lift animate-slide-up"
-                style={{ animationDelay: `${index * 100}ms` }}
-              >
+            {features.map((feature, index) =>
+            <div
+              key={feature.title}
+              className="glass-card p-6 rounded-2xl hover-lift animate-slide-up"
+              style={{ animationDelay: `${index * 100}ms` }}>
+
                 <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-primary to-faculty flex items-center justify-center mb-4">
                   <feature.icon className="w-7 h-7 text-primary-foreground" />
                 </div>
                 <h3 className="text-xl font-semibold mb-2">{feature.title}</h3>
                 <p className="text-muted-foreground">{feature.description}</p>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </section>
@@ -132,16 +132,16 @@ const Index = () => {
       <section id="stats" className="py-20 px-4">
         <div className="container mx-auto">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {stats.map((stat, index) => (
-              <div 
-                key={stat.label} 
-                className="text-center animate-slide-up"
-                style={{ animationDelay: `${index * 100}ms` }}
-              >
+            {stats.map((stat, index) =>
+            <div
+              key={stat.label}
+              className="text-center animate-slide-up"
+              style={{ animationDelay: `${index * 100}ms` }}>
+
                 <div className="text-4xl md:text-5xl font-bold gradient-text mb-2">{stat.value}</div>
                 <div className="text-muted-foreground">{stat.label}</div>
               </div>
-            ))}
+            )}
           </div>
         </div>
       </section>
@@ -218,15 +218,15 @@ const Index = () => {
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-faculty flex items-center justify-center">
               <Shield className="w-4 h-4 text-primary-foreground" />
             </div>
-            <span className="font-semibold">AcademiGuard</span>
+            <span className="font-semibold">Academic Hub</span>
           </div>
-          <p className="text-muted-foreground text-sm">
-            © 2024 AcademiGuard. All rights reserved.
+          <p className="text-muted-foreground text-sm">© 2024 Academic Hub. All rights reserved.
+
           </p>
         </div>
       </footer>
-    </div>
-  );
+    </div>);
+
 };
 
 export default Index;
