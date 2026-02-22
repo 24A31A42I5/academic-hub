@@ -29,10 +29,334 @@ interface PageResult {
   confidence: string;
 }
 
+// ==================== DETERMINISTIC PROFILE TYPES ====================
+
+interface HandwritingProfile {
+  slant: "left_lean" | "right_lean" | "upright";
+  stroke_weight: "thin" | "medium" | "thick";
+  letter_spacing: "tight" | "normal" | "wide";
+  word_spacing: "tight" | "normal" | "wide";
+  baseline: "straight" | "wavy" | "variable";
+  height_ratio: "short" | "moderate" | "tall";
+  writing_style: "cursive" | "print" | "mixed";
+  letter_formations: {
+    a: string;
+    e: string;
+    g: string;
+    r: string;
+    t: string;
+    s: string;
+  };
+  confidence_level: number;
+}
+
+interface ComparisonResult {
+  similarity_score: number;
+  same_writer: boolean;
+  confidence_level: number;
+  key_observations: string[];
+}
+
+// ==================== NORMALIZATION ====================
+
+const SLANT_MAP: Record<string, HandwritingProfile["slant"]> = {
+  "left": "left_lean", "left_lean": "left_lean", "left lean": "left_lean", "leftward": "left_lean",
+  "right": "right_lean", "right_lean": "right_lean", "right lean": "right_lean", "rightward": "right_lean",
+  "vertical": "upright", "upright": "upright", "straight": "upright", "none": "upright",
+};
+
+const WEIGHT_MAP: Record<string, HandwritingProfile["stroke_weight"]> = {
+  "thin": "thin", "light": "thin", "fine": "thin",
+  "medium": "medium", "moderate": "medium", "normal": "medium", "average": "medium",
+  "thick": "thick", "heavy": "thick", "bold": "thick",
+};
+
+const SPACING_MAP: Record<string, "tight" | "normal" | "wide"> = {
+  "tight": "tight", "cramped": "tight", "narrow": "tight", "close": "tight", "compressed": "tight",
+  "normal": "normal", "moderate": "normal", "average": "normal", "regular": "normal",
+  "wide": "wide", "broad": "wide", "spacious": "wide", "loose": "wide", "open": "wide",
+};
+
+const BASELINE_MAP: Record<string, HandwritingProfile["baseline"]> = {
+  "straight": "straight", "stable": "straight", "consistent": "straight", "even": "straight", "level": "straight",
+  "wavy": "wavy", "undulating": "wavy", "irregular": "wavy",
+  "variable": "variable", "ascending": "variable", "descending": "variable", "varied": "variable", "inconsistent": "variable", "drifting": "variable",
+};
+
+const HEIGHT_MAP: Record<string, HandwritingProfile["height_ratio"]> = {
+  "short": "short", "small": "short", "compact": "short", "low": "short",
+  "moderate": "moderate", "medium": "moderate", "average": "moderate", "normal": "moderate",
+  "tall": "tall", "large": "tall", "high": "tall", "extended": "tall",
+};
+
+const STYLE_MAP: Record<string, HandwritingProfile["writing_style"]> = {
+  "cursive": "cursive", "connected": "cursive", "script": "cursive", "flowing": "cursive",
+  "print": "print", "block": "print", "disconnected": "print", "manuscript": "print",
+  "mixed": "mixed", "hybrid": "mixed", "semi-cursive": "mixed", "partial": "mixed",
+};
+
+function mapEnum<T>(value: string | undefined | null, map: Record<string, T>): T | null {
+  if (!value) return null;
+  const key = String(value).toLowerCase().trim();
+  if (map[key]) return map[key];
+  // Partial match: check if any map key is contained in the value
+  for (const [k, v] of Object.entries(map)) {
+    if (key.includes(k)) return v;
+  }
+  return null;
+}
+
+function normalizeProfile(raw: any): HandwritingProfile | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  try {
+    // Extract slant from various possible locations in the raw profile
+    const rawSlant = raw.slant_and_baseline?.slant_direction ?? raw.slant_direction ?? raw.slant;
+    const rawStroke = raw.stroke_characteristics?.stroke_width ?? raw.stroke_width ?? raw.stroke_weight;
+    const rawLetterSpacing = raw.spacing?.letter_spacing ?? raw.letter_spacing;
+    const rawWordSpacing = raw.spacing?.word_spacing ?? raw.word_spacing;
+    const rawBaseline = raw.slant_and_baseline?.baseline_behavior ?? raw.baseline_behavior ?? raw.baseline;
+    const rawHeightRatio = raw.slant_and_baseline?.height_ratio_upper_lower ?? raw.height_ratio_upper_lower ?? raw.height_ratio;
+    const rawStyle = raw.stroke_characteristics?.connections ?? raw.connections ?? raw.writing_style;
+    const rawConfidence = raw.confidence_level ?? raw.confidence ?? 0.5;
+
+    const slant = mapEnum(rawSlant, SLANT_MAP);
+    const stroke_weight = mapEnum(rawStroke, WEIGHT_MAP);
+    const letter_spacing = mapEnum(rawLetterSpacing, SPACING_MAP);
+    const word_spacing = mapEnum(rawWordSpacing, SPACING_MAP);
+    const baseline = mapEnum(rawBaseline, BASELINE_MAP);
+    const height_ratio = mapEnum(rawHeightRatio, HEIGHT_MAP);
+    const writing_style = mapEnum(rawStyle, STYLE_MAP);
+
+    // Any required enum field missing → null
+    if (!slant || !stroke_weight || !letter_spacing || !word_spacing || !baseline || !height_ratio || !writing_style) {
+      console.log('normalizeProfile: missing required enum field', {
+        slant, stroke_weight, letter_spacing, word_spacing, baseline, height_ratio, writing_style
+      });
+      return null;
+    }
+
+    // Extract letter formations
+    const rawLetters = raw.letter_formation?.distinctive_letters ?? raw.distinctive_letters ?? raw.letter_formations ?? {};
+    const letter_formations = {
+      a: String(rawLetters.a ?? rawLetters.A ?? "unknown"),
+      e: String(rawLetters.e ?? rawLetters.E ?? "unknown"),
+      g: String(rawLetters.g ?? rawLetters.G ?? "unknown"),
+      r: String(rawLetters.r ?? rawLetters.R ?? "unknown"),
+      t: String(rawLetters.t ?? rawLetters.T ?? "unknown"),
+      s: String(rawLetters.s ?? rawLetters.S ?? "unknown"),
+    };
+
+    const confidence_level = typeof rawConfidence === 'number' ? Math.max(0, Math.min(1, rawConfidence)) : 0.5;
+
+    return {
+      slant,
+      stroke_weight,
+      letter_spacing,
+      word_spacing,
+      baseline,
+      height_ratio,
+      writing_style,
+      letter_formations,
+      confidence_level,
+    };
+  } catch (err) {
+    console.error('normalizeProfile error:', err);
+    return null;
+  }
+}
+
+// ==================== FEATURE EXTRACTION (Stage 1) ====================
+
+const EXTRACTION_PROMPT = `You are a FORENSIC DOCUMENT EXAMINER creating a biometric writer profile for writer identification purposes.
+
+CRITICAL: This is NOT image description, NOT transcription, NOT layout analysis, NOT visual similarity measurement.
+
+COMPLETELY IGNORE:
+- Words written, their meaning, topic, or content
+- Page layout and text positioning
+- Image quality, resolution, or lighting
+- Background texture or paper type
+- Ink color or pen type
+- Visual noise or artifacts
+
+Extract ONLY these stylometric (writer-identifying) features:
+
+1. LETTER SLANT: Measure the dominant slant angle and its consistency across the sample
+2. STROKE WIDTH: Classify as thin, medium, or thick; note variation patterns
+3. PEN PRESSURE: Identify pressure patterns — light, medium, heavy, or varied; note where pressure changes occur
+4. LETTER SPACING: Classify as cramped, normal, or wide; measure consistency
+5. WORD SPACING: Classify as tight, normal, or wide; measure consistency
+6. BASELINE: Assess consistency — stable, drifting upward, drifting downward, or wavy
+7. HEIGHT RATIO: Measure uppercase-to-lowercase height proportion
+8. LOOP FORMATIONS: Describe loop style for letters l, h, b, d, f, g, y — open/closed, round/narrow, size
+9. LETTER CONNECTIONS: Describe connection style — fully connected (cursive), disconnected (print), or mixed
+10. DISTINCTIVE LETTER FORMATIONS: Analyze specific formation of at least 5 of these letters: a, e, g, o, r, s, d, b, f, l, h — note unique quirks
+11. WRITING RHYTHM: Assess overall rhythm and consistency — steady, rushed, deliberate, irregular
+
+ALSO determine if the content is HANDWRITTEN or TYPED/PRINTED. Set is_handwritten to false if typed/printed.
+
+Return ONLY this JSON (no markdown, no extra text):
+{
+  "letter_formation": {
+    "overall_style": "<angular/rounded/mixed>",
+    "lowercase_characteristics": "<detailed stylometric description>",
+    "uppercase_characteristics": "<detailed stylometric description>",
+    "distinctive_letters": {"a": "<formation>", "e": "<formation>", "g": "<formation>", "r": "<formation>", "t": "<formation>", "s": "<formation>"}
+  },
+  "spacing": {
+    "letter_spacing": "<cramped/normal/wide>",
+    "word_spacing": "<tight/normal/wide>",
+    "spacing_consistency": "<uniform/varied>"
+  },
+  "stroke_characteristics": {
+    "pressure": "<light/medium/heavy/varied>",
+    "stroke_width": "<thin/medium/thick/varied>",
+    "connections": "<print/cursive/mixed>",
+    "pressure_change_pattern": "<description of where pressure varies>"
+  },
+  "slant_and_baseline": {
+    "slant_direction": "<left/vertical/right>",
+    "slant_consistency": "<consistent/slightly varied/highly varied>",
+    "baseline_behavior": "<stable/ascending/descending/wavy>",
+    "height_ratio_upper_lower": "<short/moderate/tall>"
+  },
+  "unique_identifiers": [
+    "<specific biometric feature 1>",
+    "<specific biometric feature 2>",
+    "<specific biometric feature 3>"
+  ],
+  "overall_description": "<2-3 sentence stylometric signature summary focusing ONLY on writing mechanics>",
+  "confidence_level": <decimal 0 to 1>,
+  "is_handwritten": <boolean>
+}`;
+
+async function extractPageFeatures(
+  pageNumber: number,
+  imageBase64: string,
+  apiKey: string
+): Promise<{ profile: HandwritingProfile | null; is_handwritten: boolean }> {
+  console.log(`Extracting features for page ${pageNumber}...`);
+
+  const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-2.5-flash',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: EXTRACTION_PROMPT },
+            {
+              type: 'image_url',
+              image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
+            }
+          ]
+        }
+      ],
+    }),
+  });
+
+  if (!aiResponse.ok) {
+    const status = aiResponse.status;
+    if (status === 429) throw new Error('Rate limit exceeded');
+    if (status === 402) throw new Error('AI credits exhausted');
+    throw new Error(`AI Gateway error: ${status}`);
+  }
+
+  const aiData = await aiResponse.json();
+  const responseText = aiData.choices?.[0]?.message?.content || '';
+
+  // Clean and parse JSON
+  let cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    console.error(`Page ${pageNumber}: No JSON found in AI response`);
+    return { profile: null, is_handwritten: true };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    const is_handwritten = parsed.is_handwritten !== false;
+    const profile = normalizeProfile(parsed);
+    console.log(`Page ${pageNumber}: extraction ${profile ? 'success' : 'failed normalization'}, handwritten: ${is_handwritten}`);
+    return { profile, is_handwritten };
+  } catch (err) {
+    console.error(`Page ${pageNumber}: JSON parse error:`, err);
+    return { profile: null, is_handwritten: true };
+  }
+}
+
+// ==================== DETERMINISTIC COMPARISON (Stage 2) ====================
+
+function compareProfiles(ref: HandwritingProfile, sub: HandwritingProfile): ComparisonResult {
+  let score = 0;
+  const matched: string[] = [];
+  const mismatched: string[] = [];
+
+  // Slant (15 pts)
+  if (ref.slant === sub.slant) { score += 15; matched.push('slant'); }
+  else { mismatched.push(`slant (ref:${ref.slant} vs sub:${sub.slant})`); }
+
+  // Stroke Weight (10 pts)
+  if (ref.stroke_weight === sub.stroke_weight) { score += 10; matched.push('stroke_weight'); }
+  else { mismatched.push(`stroke_weight (ref:${ref.stroke_weight} vs sub:${sub.stroke_weight})`); }
+
+  // Letter Spacing (15 pts)
+  if (ref.letter_spacing === sub.letter_spacing) { score += 15; matched.push('letter_spacing'); }
+  else { mismatched.push(`letter_spacing (ref:${ref.letter_spacing} vs sub:${sub.letter_spacing})`); }
+
+  // Letter Formations (6 x 5 = 30 pts)
+  const letters = ['a', 'e', 'g', 'r', 't', 's'] as const;
+  let letterMatches = 0;
+  for (const letter of letters) {
+    const refVal = ref.letter_formations[letter]?.toLowerCase().trim();
+    const subVal = sub.letter_formations[letter]?.toLowerCase().trim();
+    if (refVal && subVal && refVal !== "unknown" && subVal !== "unknown" && refVal === subVal) {
+      score += 5;
+      letterMatches++;
+    }
+  }
+  if (letterMatches > 0) matched.push(`letter_formations (${letterMatches}/6)`);
+  if (letterMatches < 6) mismatched.push(`letter_formations (${6 - letterMatches}/6 differ)`);
+
+  // Baseline (10 pts)
+  if (ref.baseline === sub.baseline) { score += 10; matched.push('baseline'); }
+  else { mismatched.push(`baseline (ref:${ref.baseline} vs sub:${sub.baseline})`); }
+
+  // Height Ratio (10 pts)
+  if (ref.height_ratio === sub.height_ratio) { score += 10; matched.push('height_ratio'); }
+  else { mismatched.push(`height_ratio (ref:${ref.height_ratio} vs sub:${sub.height_ratio})`); }
+
+  // Writing Style (10 pts)
+  if (ref.writing_style === sub.writing_style) { score += 10; matched.push('writing_style'); }
+  else { mismatched.push(`writing_style (ref:${ref.writing_style} vs sub:${sub.writing_style})`); }
+
+  const confidence_level = (ref.confidence_level + sub.confidence_level) / 2;
+
+  const key_observations = [
+    `Matched: ${matched.join(', ') || 'none'}`,
+    `Mismatched: ${mismatched.join(', ') || 'none'}`,
+    `Score: ${score}/100`,
+  ];
+
+  return {
+    similarity_score: score,
+    same_writer: score >= 70,
+    confidence_level,
+    key_observations,
+  };
+}
+
+// ==================== UNCHANGED UTILITIES ====================
+
 async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64: string; size: number }> {
   console.log('Fetching image:', url);
   
-  // If it's a bare storage path (not starting with http), generate a signed URL
   if (!url.startsWith('http')) {
     console.log('Generating signed URL for storage path:', url);
     const { data: signedData, error: signedError } = await supabase.storage
@@ -46,7 +370,6 @@ async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64:
     url = signedData.signedUrl;
     console.log('Using signed URL for storage path');
   } else {
-    // Check if this is a Supabase storage URL that needs a signed URL
     const uploadsBucketMatch = url.match(/\/storage\/v1\/object\/public\/uploads\/(.+?)(\?.*)?$/);
     if (uploadsBucketMatch) {
       const filePath = uploadsBucketMatch[1];
@@ -98,7 +421,6 @@ function determineStatus(score: number, hasCriticalFlag: boolean, hasTypedConten
   return 'verified';
 }
 
-// Error types for better frontend messaging
 type ErrorType = 'no_profile' | 'file_too_large' | 'ai_gateway_error' | 'parse_error' | 'rate_limit' | 'typed_content_detected' | 'unknown';
 
 interface FallbackResult {
@@ -170,121 +492,7 @@ function getFallbackResult(errorType: ErrorType): FallbackResult {
   }
 }
 
-async function verifyPage(
-  pageNumber: number,
-  imageBase64: string,
-  referenceBase64: string,
-  handwritingProfile: any,
-  apiKey: string
-): Promise<PageResult> {
-  const verificationPrompt = `You are a FORENSIC HANDWRITING ANALYST performing biometric writer identification for an academic integrity system.
-
-CRITICAL: This is WRITER IDENTIFICATION based on stylometric features — NOT image comparison, NOT content matching, NOT visual similarity.
-
-COMPLETELY IGNORE:
-- Words written, text content, or meaning
-- Whether images look similar or identical as photographs
-- Page layout, margins, or text positioning
-- Background texture, paper type, or image quality
-- Ink color or pen type
-
-CORE PRINCIPLE:
-- SAME writer = consistent stylometric features even across DIFFERENT pages with DIFFERENT content
-- DIFFERENT writers = inconsistent stylometric features even with SIMILAR content
-- Even if two images appear visually identical, you MUST analyze stylometric features only
-
-## STUDENT'S KNOWN STYLOMETRIC PROFILE:
-${JSON.stringify(handwritingProfile, null, 2)}
-
-## COMPARE ONLY THESE STYLOMETRIC FEATURES:
-1. Letter slant angle and consistency
-2. Stroke weight and pen pressure patterns
-3. Letter spacing patterns
-4. Word spacing patterns
-5. Baseline behavior (stable, ascending, descending, wavy)
-6. Loop formations in letters l, h, b, d, f, g, y
-7. Specific letter formations: a, e, g, o, r, s
-8. Letter connection style (cursive, print, mixed)
-9. Writing rhythm, density, and consistency
-10. Uppercase-to-lowercase height proportions
-
-## FIRST: Determine if this page is HANDWRITTEN or TYPED/PRINTED
-- If typed/printed → is_handwritten = false, similarity_score = 0
-
-## SCORING (stylometric match ONLY):
-- Multiple distinctive stylometric features match: similarity_score >= 75
-- Clearly different writing mechanics: similarity_score <= 30
-- Uncertain stylometric match: similarity_score 40-74
-- Score 100 requires multiple distinctive feature matches — NEVER justified by image similarity alone
-
-## DECISION:
-- similarity_score >= 75 → same_writer = true
-- similarity_score < 75 → same_writer = false
-
-## REASONING RULES:
-- Reasoning MUST reference specific handwriting features (slant, loops, spacing, pressure, etc.)
-- Reasoning MUST NOT mention visual similarity, image similarity, or content similarity
-
-Return ONLY valid JSON. No markdown. No explanations outside JSON.
-
-{
-  "similarity_score": <integer 0-100>,
-  "same_writer": <boolean>,
-  "confidence_level": "<low|medium|high>",
-  "is_handwritten": <boolean>,
-  "key_observations": ["<stylometric observation 1>", "<stylometric observation 2>"]
-}`;
-
-  const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: verificationPrompt },
-            {
-              type: 'image_url',
-              image_url: { url: `data:image/jpeg;base64,${referenceBase64}` }
-            },
-            {
-              type: 'image_url',
-              image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
-            }
-          ]
-        }
-      ],
-    }),
-  });
-
-  if (!aiResponse.ok) {
-    throw new Error(`AI Gateway error: ${aiResponse.status}`);
-  }
-
-  const aiData = await aiResponse.json();
-  const responseText = aiData.choices?.[0]?.message?.content || '';
-
-  // Parse the verification result
-  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('No JSON found in AI response');
-  }
-
-  const result = JSON.parse(jsonMatch[0]);
-
-  return {
-    page: pageNumber,
-    similarity: Math.max(0, Math.min(100, result.similarity_score ?? 50)),
-    same_writer: result.same_writer ?? false,
-    is_handwritten: result.is_handwritten !== false,
-    confidence: result.confidence_level || 'medium'
-  };
-}
+// ==================== MAIN HANDLER ====================
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -295,10 +503,9 @@ serve(async (req) => {
     const body = await req.json();
     const { submission_id, file_urls, file_url, student_profile_id, page_count } = body;
 
-    // Support both single file_url (backward compat) and file_urls array
     const imageUrls: string[] = file_urls || (file_url ? [file_url] : []);
 
-    console.log('=== IMAGE-ONLY HANDWRITING VERIFICATION START ===');
+    console.log('=== DETERMINISTIC HANDWRITING VERIFICATION START ===');
     console.log('Submission ID:', submission_id);
     console.log('Image URLs:', imageUrls.length, 'pages');
     console.log('Student Profile ID:', student_profile_id);
@@ -313,8 +520,7 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Get student's trained handwriting profile
-    // Fix 8: Ownership verification before processing
+    // Ownership verification
     const { data: ownerCheck } = await supabase
       .from('submissions')
       .select('student_profile_id')
@@ -340,7 +546,7 @@ serve(async (req) => {
       }
     }
 
-    // Fix 3: Add handwriting_features_extracted_at for CDN cache busting
+    // Fetch student's stored handwriting profile (reference)
     const { data: studentDetails, error: studentError } = await supabase
       .from('student_details')
       .select('handwriting_feature_embedding, handwriting_url, handwriting_features_extracted_at, roll_number')
@@ -353,10 +559,9 @@ serve(async (req) => {
     }
 
     const handwritingProfile = studentDetails?.handwriting_feature_embedding;
-    const referenceImageUrl = studentDetails?.handwriting_url;
 
     // If no handwriting profile exists, mark for manual review
-    if (!handwritingProfile || !referenceImageUrl) {
+    if (!handwritingProfile) {
       console.log('No handwriting profile found - marking for manual review');
       const fallback = getFallbackResult('no_profile');
       
@@ -369,7 +574,7 @@ serve(async (req) => {
           status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '4.0-image-only',
+            algorithm_version: '5.0-deterministic',
             error_type: fallback.error_type,
             reason: fallback.message,
             page_count: imageUrls.length,
@@ -387,18 +592,43 @@ serve(async (req) => {
       });
     }
 
-    // Fix 3: Build cache-busted reference URL
-    const extractedAt = studentDetails?.handwriting_features_extracted_at
-      ? new Date(studentDetails.handwriting_features_extracted_at).getTime()
-      : Date.now();
-    const cacheBustedReferenceUrl = `${referenceImageUrl!.split('?')[0]}?t=${extractedAt}`;
+    // Normalize the stored reference profile
+    const referenceProfile = normalizeProfile(handwritingProfile);
+    if (!referenceProfile) {
+      console.error('Failed to normalize reference profile. Raw:', JSON.stringify(handwritingProfile));
+      const fallback = getFallbackResult('no_profile');
+      fallback.message = 'Handwriting profile could not be normalized. Please retrain your handwriting sample.';
+      
+      await supabase
+        .from('submissions')
+        .update({
+          ai_similarity_score: fallback.score,
+          ai_confidence_score: 0,
+          ai_risk_level: fallback.risk_level,
+          status: fallback.status,
+          verified_at: new Date().toISOString(),
+          ai_analysis_details: {
+            algorithm_version: '5.0-deterministic',
+            error_type: 'parse_error',
+            reason: fallback.message,
+            page_count: imageUrls.length,
+            recommendation: 'Student should retrain handwriting profile'
+          },
+          page_verification_results: null,
+        })
+        .eq('id', submission_id);
 
-    // Fetch reference image with cache-busted URL
-    console.log('Fetching reference handwriting sample (cache-busted)...');
-    const { base64: referenceBase64, size: refSize } = await fetchImageAsBase64(cacheBustedReferenceUrl, supabase);
-    console.log('Reference image size:', refSize, 'bytes');
+      return new Response(JSON.stringify({
+        success: true,
+        ...fallback
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
-    // Process each page
+    console.log('Reference profile normalized:', JSON.stringify(referenceProfile));
+
+    // Process each page: extract features then compare deterministically
     const pageResults: PageResult[] = [];
     let hasTypedContent = false;
     let hasDifferentWriter = false;
@@ -426,20 +656,57 @@ serve(async (req) => {
           continue;
         }
 
-        // Verify this page
-        const pageResult = await verifyPage(
+        // Stage 1: Extract features from submission page
+        const { profile: submissionProfile, is_handwritten } = await extractPageFeatures(
           pageNum,
           pageBase64,
-          referenceBase64,
-          handwritingProfile,
           LOVABLE_API_KEY
         );
 
+        // Typed content detection
+        if (!is_handwritten) {
+          console.log(`Page ${pageNum}: typed/printed content detected`);
+          hasTypedContent = true;
+          pageResults.push({
+            page: pageNum,
+            similarity: 0,
+            same_writer: false,
+            is_handwritten: false,
+            confidence: 'high'
+          });
+          continue;
+        }
+
+        // Extraction failed → fallback
+        if (!submissionProfile) {
+          console.log(`Page ${pageNum}: feature extraction failed, using fallback`);
+          pageResults.push({
+            page: pageNum,
+            similarity: 50,
+            same_writer: false,
+            is_handwritten: true,
+            confidence: 'low'
+          });
+          continue;
+        }
+
+        // Stage 2: Deterministic comparison
+        const comparison = compareProfiles(referenceProfile, submissionProfile);
+        console.log(`Page ${pageNum} deterministic result:`, comparison);
+
+        const confidenceStr = comparison.confidence_level >= 0.7 ? 'high' 
+          : comparison.confidence_level >= 0.4 ? 'medium' : 'low';
+
+        const pageResult: PageResult = {
+          page: pageNum,
+          similarity: comparison.similarity_score,
+          same_writer: comparison.same_writer,
+          is_handwritten: true,
+          confidence: confidenceStr,
+        };
+
         pageResults.push(pageResult);
 
-        if (!pageResult.is_handwritten) {
-          hasTypedContent = true;
-        }
         if (!pageResult.same_writer) {
           hasDifferentWriter = true;
         }
@@ -448,7 +715,6 @@ serve(async (req) => {
 
       } catch (pageError: any) {
         console.error(`Error processing page ${pageNum}:`, pageError);
-        // Add a fallback result for this page
         pageResults.push({
           page: pageNum,
           similarity: 50,
@@ -509,7 +775,7 @@ serve(async (req) => {
         status: status,
         verified_at: new Date().toISOString(),
         ai_analysis_details: {
-          algorithm_version: '4.0-image-only',
+          algorithm_version: '5.0-deterministic',
           page_count: pageResults.length,
           overall_similarity_score: overallSimilarity,
           same_writer: overallSameWriter,
