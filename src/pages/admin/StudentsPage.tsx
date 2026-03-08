@@ -91,7 +91,7 @@ const StudentsPage = () => {
 
   // Edit dialog
   const [editStudent, setEditStudent] = useState<Student | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone_number: '', year: '', branch: '', section: '', semester: '', roll_number: '' });
+  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone_number: '', year: '', branch: '', section: '', semester: '', roll_number: '', password: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -253,6 +253,7 @@ const StudentsPage = () => {
       section: details?.section || '',
       semester: details?.semester || 'I',
       roll_number: details?.roll_number || '',
+      password: '',
     });
   };
 
@@ -286,6 +287,19 @@ const StudentsPage = () => {
         .eq('profile_id', editStudent.id);
 
       if (detailsError) throw detailsError;
+
+      // Update password if provided
+      if (editForm.password.trim()) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const response = await supabase.functions.invoke('update-user-password', {
+          body: { user_id: editStudent.user_id, password: editForm.password.trim() },
+        });
+        if (response.error) {
+          toast.error('Profile updated but password change failed');
+          setSaving(false);
+          return;
+        }
+      }
 
       toast.success('Student updated successfully');
       setEditStudent(null);
@@ -958,6 +972,10 @@ const StudentsPage = () => {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            <div>
+              <Label>New Password (leave blank to keep current)</Label>
+              <Input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Enter new password" />
             </div>
           </div>
           <DialogFooter>
