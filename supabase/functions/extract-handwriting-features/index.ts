@@ -278,61 +278,15 @@ serve(async (req) => {
   }
 
   try {
-    const { image_url, student_details_id, handwriting_url, handwriting_image_hash, mode } = await req.json();
+    const { image_url, student_details_id } = await req.json();
 
     console.log('=== HANDWRITING FEATURE EXTRACTION v7.0-enhanced START ===');
-    console.log('Student details ID:', student_details_id, '| Mode:', mode || 'extract');
+    console.log('Student details ID:', student_details_id);
 
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY is not configured');
-    if (!student_details_id) throw new Error('Missing student_details_id');
+    if (!image_url || !student_details_id) throw new Error('Missing required parameters');
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-    // Mode: "save_and_extract" — called after upload to save URL/hash then extract
-    // Mode: "retrain" — clear old features then re-extract from existing URL  
-    // Default: just extract from provided image_url
-
-    let extractionUrl = image_url;
-
-    if (mode === 'save_and_extract') {
-      // Save handwriting URL and hash (service role bypasses trigger)
-      if (!handwriting_url) throw new Error('Missing handwriting_url');
-      const { error: saveError } = await supabase
-        .from('student_details')
-        .update({
-          handwriting_url: handwriting_url,
-          handwriting_submitted_at: new Date().toISOString(),
-          handwriting_image_hash: handwriting_image_hash || null,
-        })
-        .eq('id', student_details_id);
-      if (saveError) throw new Error('Failed to save handwriting URL: ' + saveError.message);
-      extractionUrl = handwriting_url;
-      console.log('Saved handwriting URL and hash');
-    } else if (mode === 'retrain') {
-      // Clear old features first, then re-extract
-      const { data: existing, error: fetchErr } = await supabase
-        .from('student_details')
-        .select('handwriting_url')
-        .eq('id', student_details_id)
-        .single();
-      if (fetchErr || !existing?.handwriting_url) throw new Error('No handwriting URL found for retrain');
-      
-      const { error: clearError } = await supabase
-        .from('student_details')
-        .update({
-          handwriting_feature_embedding: null,
-          handwriting_features_extracted_at: null,
-        })
-        .eq('id', student_details_id);
-      if (clearError) throw new Error('Failed to clear old features: ' + clearError.message);
-      
-      extractionUrl = `${existing.handwriting_url.split('?')[0]}?t=${Date.now()}`;
-      console.log('Cleared old features, retraining from:', extractionUrl);
-    }
-
-    if (!extractionUrl) throw new Error('Missing image_url');
-
-    const imageBase64 = await fetchFileAsBase64(extractionUrl);
+    const imageBase64 = await fetchFileAsBase64(image_url);
     console.log('Image fetched, base64 length:', imageBase64.length);
 
     const extractedProfiles: any[] = [];
@@ -375,11 +329,12 @@ serve(async (req) => {
 
     handwritingProfile.version = '7.0-enhanced';
     handwritingProfile.trained_at = new Date().toISOString();
-    handwritingProfile.reference_image_url = extractionUrl;
+    handwritingProfile.reference_image_url = image_url;
     handwritingProfile.feature_count = CORE_FIELDS.length + EXTENDED_FIELDS.length + LETTERS.length;
 
     console.log(`Consensus from ${extractedProfiles.length}/${EXTRACTION_ATTEMPTS} attempts`);
 
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { error: updateError } = await supabase
       .from('student_details')
       .update({

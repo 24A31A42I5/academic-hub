@@ -191,7 +191,19 @@ const StudentHandwriting = () => {
         .from('handwriting-samples')
         .getPublicUrl(fileName);
 
-      // Save URL/hash and extract features via edge function (uses service role)
+      // Update student_details with handwriting URL and hash
+      const { error: updateError } = await supabase
+        .from('student_details')
+        .update({
+          handwriting_url: publicUrl,
+          handwriting_submitted_at: new Date().toISOString(),
+          handwriting_image_hash: imageHash,
+        })
+        .eq('id', studentDetails.id);
+
+      if (updateError) throw updateError;
+
+      // Now extract features using the edge function
       setUploading(false);
       setExtractingFeatures(true);
 
@@ -200,9 +212,6 @@ const StudentHandwriting = () => {
           body: {
             image_url: publicUrl,
             student_details_id: studentDetails.id,
-            handwriting_url: publicUrl,
-            handwriting_image_hash: imageHash,
-            mode: 'save_and_extract',
           },
         });
 
@@ -259,11 +268,29 @@ const StudentHandwriting = () => {
 
     setRetraining(true);
     try {
-      // Use retrain mode — edge function clears old features and re-extracts (service role)
+      // Step 1: Null out old features first
+      const { error: clearError } = await supabase
+        .from('student_details')
+        .update({
+          handwriting_feature_embedding: null,
+          handwriting_features_extracted_at: null,
+        })
+        .eq('id', studentDetails.id)
+        .eq('profile_id', profile!.id);
+
+      if (clearError) {
+        toast.error('Failed to clear old features');
+        return;
+      }
+
+      // Step 2: Build cache-busted URL
+      const freshUrl = `${studentDetails.handwriting_url.split('?')[0]}?t=${Date.now()}`;
+
+      // Step 3: Re-extract features
       const { data, error } = await supabase.functions.invoke('extract-handwriting-features', {
         body: {
+          image_url: freshUrl,
           student_details_id: studentDetails.id,
-          mode: 'retrain',
         },
       });
 
@@ -272,7 +299,7 @@ const StudentHandwriting = () => {
 
       toast.success('Handwriting model retrained successfully!');
 
-      // Refresh local state
+      // Step 4: Refresh local state
       const { data: updatedDetails } = await supabase
         .from('student_details')
         .select('*')
