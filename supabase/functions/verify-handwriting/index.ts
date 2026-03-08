@@ -90,8 +90,8 @@ const HEIGHT_MAP: Record<string, HandwritingProfile["height_ratio"]> = {
   "short": "short", "small": "short", "compact": "short", "low": "short",
   "moderate": "moderate", "medium": "moderate", "average": "moderate", "normal": "moderate",
   "tall": "tall", "large": "tall", "extended": "tall",
-  "approximately twice": "tall", "twice the height": "tall", "2x": "tall",
-  "1.5": "moderate", "proportional": "moderate",
+  "approximately twice": "tall", "twice the height": "tall", "2x": "tall", "2:1": "tall",
+  "1.5": "moderate", "proportional": "moderate", "1.5:1": "moderate",
 };
 
 const STYLE_MAP: Record<string, HandwritingProfile["writing_style"]> = {
