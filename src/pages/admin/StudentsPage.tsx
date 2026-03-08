@@ -973,6 +973,10 @@ const StudentsPage = () => {
                 </Select>
               </div>
             </div>
+            <div>
+              <Label>New Password (leave blank to keep current)</Label>
+              <Input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Enter new password" />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditStudent(null)}>Cancel</Button>
