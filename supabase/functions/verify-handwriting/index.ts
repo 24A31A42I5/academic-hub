@@ -553,6 +553,7 @@ serve(async (req) => {
     const pageResults: PageResult[] = [];
     let hasTyped = false, hasDiffWriter = false, totalRare = 0;
     let bestEvidence = 'weak';
+    let firstPageComparison: ComparisonResult | null = null;
 
     for (let i = 0; i < imageUrls.length; i++) {
       const pageNum = i + 1;
@@ -581,6 +582,7 @@ serve(async (req) => {
         }
 
         const cmp = compareProfiles(referenceProfile, subProfile, weightMap);
+        if (!firstPageComparison) firstPageComparison = cmp;
         totalRare += cmp.rare_feature_matches;
         if (['very_strong', 'strong'].includes(cmp.evidence_strength)) bestEvidence = cmp.evidence_strength;
 
