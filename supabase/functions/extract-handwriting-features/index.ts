@@ -278,13 +278,32 @@ serve(async (req) => {
   }
 
   try {
-    const { image_url, student_details_id } = await req.json();
+    const { image_url, student_details_id, retrain } = await req.json();
 
     console.log('=== HANDWRITING FEATURE EXTRACTION v7.0-enhanced START ===');
-    console.log('Student details ID:', student_details_id);
+    console.log('Student details ID:', student_details_id, 'Retrain:', !!retrain);
 
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY is not configured');
     if (!image_url || !student_details_id) throw new Error('Missing required parameters');
+
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // If retraining, clear old features first (service role bypasses trigger)
+    if (retrain) {
+      const { error: clearError } = await supabaseAdmin
+        .from('student_details')
+        .update({
+          handwriting_feature_embedding: null,
+          handwriting_features_extracted_at: null,
+        })
+        .eq('id', student_details_id);
+
+      if (clearError) {
+        console.error('Failed to clear old features:', clearError);
+        throw new Error('Failed to clear old features');
+      }
+      console.log('Old features cleared for retrain');
+    }
 
     const imageBase64 = await fetchFileAsBase64(image_url);
     console.log('Image fetched, base64 length:', imageBase64.length);
@@ -334,8 +353,7 @@ serve(async (req) => {
 
     console.log(`Consensus from ${extractedProfiles.length}/${EXTRACTION_ATTEMPTS} attempts`);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('student_details')
       .update({
         handwriting_feature_embedding: handwritingProfile,
