@@ -20,6 +20,3 @@ verify_jwt = false
 
 [functions.resolve-submission-files]
 verify_jwt = false
-
-[functions.update-user-password]
-verify_jwt = true

@@ -354,11 +354,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      faculty_can_view_profile: {
-        Args: { _faculty_user_id: string; _profile_id: string }
-        Returns: boolean
-      }
-      get_profile_id_for_user: { Args: { _user_id: string }; Returns: string }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
