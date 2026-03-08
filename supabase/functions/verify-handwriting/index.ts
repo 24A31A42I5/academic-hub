@@ -309,7 +309,6 @@ REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
 
 // ==================== FEATURE EXTRACTION (Stage 1) ====================
 
-const LETTER_KEYS = ['a', 'e', 'g', 'r', 't', 's'] as const;
 const EXTRACTION_ATTEMPTS = 3;
 
 function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
