@@ -91,7 +91,7 @@ const StudentsPage = () => {
 
   // Edit dialog
   const [editStudent, setEditStudent] = useState<Student | null>(null);
-  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone_number: '', year: '', branch: '', section: '', semester: '', roll_number: '' });
+  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone_number: '', year: '', branch: '', section: '', semester: '', roll_number: '', password: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
 
