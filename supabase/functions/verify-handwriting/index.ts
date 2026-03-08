@@ -13,12 +13,11 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // ==================== CONFIGURATION ====================
 const VERIFICATION_THRESHOLDS = {
-  VERIFIED: 75,        // >= 75: Verified (same writer)
-  MANUAL_REVIEW: 50,   // 50-74: Manual Review required
-  REUPLOAD: 0          // < 50: Reupload Required
+  VERIFIED: 75,
+  MANUAL_REVIEW: 50,
+  REUPLOAD: 0
 };
 
-// Maximum base64 size to send to AI (5MB encoded = ~3.75MB file)
 const MAX_BASE64_SIZE = 5 * 1024 * 1024;
 
 interface PageResult {
@@ -29,7 +28,18 @@ interface PageResult {
   confidence: string;
 }
 
-// ==================== DETERMINISTIC PROFILE TYPES ====================
+// ==================== STRICT ENUM DEFINITIONS ====================
+
+const VALID_ENUMS: Record<string, string[]> = {
+  slant: ['left_lean', 'right_lean', 'upright'],
+  stroke_weight: ['thin', 'medium', 'thick'],
+  letter_spacing: ['tight', 'normal', 'wide'],
+  word_spacing: ['tight', 'normal', 'wide'],
+  baseline: ['straight', 'wavy', 'variable'],
+  height_ratio: ['short', 'moderate', 'tall'],
+  writing_style: ['cursive', 'print', 'mixed'],
+  letter_shape: ['rounded', 'angular', 'looped', 'open', 'closed', 'simple', 'mixed'],
+};
 
 interface HandwritingProfile {
   slant: "left_lean" | "right_lean" | "upright";
@@ -50,14 +60,7 @@ interface HandwritingProfile {
   confidence_level: number;
 }
 
-interface ComparisonResult {
-  similarity_score: number;
-  same_writer: boolean;
-  confidence_level: number;
-  key_observations: string[];
-}
-
-// ==================== NORMALIZATION ====================
+// ==================== NORMALIZATION (backward compat for old profiles) ====================
 
 const SLANT_MAP: Record<string, HandwritingProfile["slant"]> = {
   "left": "left_lean", "left_lean": "left_lean", "left lean": "left_lean", "leftward": "left_lean",
@@ -87,7 +90,6 @@ const HEIGHT_MAP: Record<string, HandwritingProfile["height_ratio"]> = {
   "short": "short", "small": "short", "compact": "short", "low": "short",
   "moderate": "moderate", "medium": "moderate", "average": "moderate", "normal": "moderate",
   "tall": "tall", "large": "tall", "extended": "tall",
-  // Descriptive phrases
   "approximately twice": "tall", "twice the height": "tall", "2x": "tall",
   "1.5": "moderate", "proportional": "moderate",
 };
@@ -98,12 +100,11 @@ const STYLE_MAP: Record<string, HandwritingProfile["writing_style"]> = {
   "mixed": "mixed", "hybrid": "mixed", "semi-cursive": "mixed", "partial": "mixed",
 };
 
-// Letter formation shape categories for deterministic comparison
 type LetterShape = "rounded" | "angular" | "looped" | "open" | "closed" | "simple" | "mixed";
 
 const LETTER_SHAPE_MAP: Record<string, LetterShape> = {
   "rounded": "rounded", "round": "rounded", "oval": "rounded", "circular": "rounded", "curved": "rounded",
-  "angular": "angular", "sharp": "angular", "pointed": "angular", "straight": "angular",
+  "angular": "angular", "sharp": "angular", "pointed": "angular",
   "looped": "looped", "loop": "looped", "loopy": "looped",
   "open": "open", "unclosed": "open", "gap": "open",
   "closed": "closed", "sealed": "closed", "complete": "closed",
@@ -114,7 +115,8 @@ const LETTER_SHAPE_MAP: Record<string, LetterShape> = {
 function normalizeLetterShape(description: string | undefined | null): LetterShape {
   if (!description || description === "unknown") return "simple";
   const lower = description.toLowerCase();
-  // Priority order: check most distinctive shapes first
+  // Direct match first
+  if (VALID_ENUMS.letter_shape.includes(lower)) return lower as LetterShape;
   for (const [keyword, shape] of Object.entries(LETTER_SHAPE_MAP)) {
     if (lower.includes(keyword)) return shape;
   }
@@ -124,24 +126,50 @@ function normalizeLetterShape(description: string | undefined | null): LetterSha
 function mapEnum<T>(value: string | undefined | null, map: Record<string, T>): T | null {
   if (!value) return null;
   const key = String(value).toLowerCase().trim();
-  // Exact match first
   if (map[key]) return map[key];
-  // Multi-word key match (for phrases like "approximately twice")
-  // Check longest keys first to prioritize specific matches
   const sortedEntries = Object.entries(map).sort((a, b) => b[0].length - a[0].length);
   for (const [k, v] of sortedEntries) {
-    // Use word boundary check: the key must appear as a standalone word/phrase
     const regex = new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
     if (regex.test(key)) return v;
   }
   return null;
 }
 
+function isStrictProfile(raw: any): boolean {
+  // Check if profile already has strict enum values (v6.0+)
+  return VALID_ENUMS.slant.includes(raw.slant) &&
+    VALID_ENUMS.stroke_weight.includes(raw.stroke_weight) &&
+    VALID_ENUMS.letter_spacing.includes(raw.letter_spacing);
+}
+
 function normalizeProfile(raw: any): HandwritingProfile | null {
   if (!raw || typeof raw !== 'object') return null;
 
   try {
-    // Extract slant from various possible locations in the raw profile
+    // If already strict enum format (v6.0+), use directly
+    if (isStrictProfile(raw)) {
+      const letter_formations = raw.letter_formations || {};
+      return {
+        slant: raw.slant,
+        stroke_weight: raw.stroke_weight,
+        letter_spacing: raw.letter_spacing,
+        word_spacing: VALID_ENUMS.word_spacing.includes(raw.word_spacing) ? raw.word_spacing : 'normal',
+        baseline: VALID_ENUMS.baseline.includes(raw.baseline) ? raw.baseline : 'straight',
+        height_ratio: VALID_ENUMS.height_ratio.includes(raw.height_ratio) ? raw.height_ratio : 'moderate',
+        writing_style: VALID_ENUMS.writing_style.includes(raw.writing_style) ? raw.writing_style : 'mixed',
+        letter_formations: {
+          a: VALID_ENUMS.letter_shape.includes(letter_formations.a) ? letter_formations.a : normalizeLetterShape(letter_formations.a),
+          e: VALID_ENUMS.letter_shape.includes(letter_formations.e) ? letter_formations.e : normalizeLetterShape(letter_formations.e),
+          g: VALID_ENUMS.letter_shape.includes(letter_formations.g) ? letter_formations.g : normalizeLetterShape(letter_formations.g),
+          r: VALID_ENUMS.letter_shape.includes(letter_formations.r) ? letter_formations.r : normalizeLetterShape(letter_formations.r),
+          t: VALID_ENUMS.letter_shape.includes(letter_formations.t) ? letter_formations.t : normalizeLetterShape(letter_formations.t),
+          s: VALID_ENUMS.letter_shape.includes(letter_formations.s) ? letter_formations.s : normalizeLetterShape(letter_formations.s),
+        },
+        confidence_level: typeof raw.confidence_level === 'number' ? Math.max(0, Math.min(1, raw.confidence_level)) : 0.5,
+      };
+    }
+
+    // Legacy normalization for old profiles (v3.0/v5.0)
     const rawSlant = raw.slant_and_baseline?.slant_direction ?? raw.slant_direction ?? raw.slant;
     const rawStroke = raw.stroke_characteristics?.stroke_width ?? raw.stroke_width ?? raw.stroke_weight;
     const rawLetterSpacing = raw.spacing?.letter_spacing ?? raw.letter_spacing;
@@ -159,7 +187,6 @@ function normalizeProfile(raw: any): HandwritingProfile | null {
     const height_ratio = mapEnum(rawHeightRatio, HEIGHT_MAP);
     const writing_style = mapEnum(rawStyle, STYLE_MAP);
 
-    // Any required enum field missing → null
     if (!slant || !stroke_weight || !letter_spacing || !word_spacing || !baseline || !height_ratio || !writing_style) {
       console.log('normalizeProfile: missing required enum field', {
         slant, stroke_weight, letter_spacing, word_spacing, baseline, height_ratio, writing_style
@@ -167,7 +194,6 @@ function normalizeProfile(raw: any): HandwritingProfile | null {
       return null;
     }
 
-    // Extract letter formations and normalize to shape categories
     const rawLetters = raw.letter_formation?.distinctive_letters ?? raw.distinctive_letters ?? raw.letter_formations ?? {};
     const letter_formations = {
       a: normalizeLetterShape(rawLetters.a ?? rawLetters.A),
@@ -180,87 +206,97 @@ function normalizeProfile(raw: any): HandwritingProfile | null {
 
     const confidence_level = typeof rawConfidence === 'number' ? Math.max(0, Math.min(1, rawConfidence)) : 0.5;
 
-    return {
-      slant,
-      stroke_weight,
-      letter_spacing,
-      word_spacing,
-      baseline,
-      height_ratio,
-      writing_style,
-      letter_formations,
-      confidence_level,
-    };
+    return { slant, stroke_weight, letter_spacing, word_spacing, baseline, height_ratio, writing_style, letter_formations, confidence_level };
   } catch (err) {
     console.error('normalizeProfile error:', err);
     return null;
   }
 }
 
-// ==================== FEATURE EXTRACTION (Stage 1) ====================
+// ==================== STRICT EXTRACTION PROMPT ====================
 
-const EXTRACTION_PROMPT = `You are a FORENSIC DOCUMENT EXAMINER creating a biometric writer profile for writer identification purposes.
+const EXTRACTION_PROMPT = `You are a forensic handwriting analyst extracting biometric features from a handwriting sample. You MUST return a structured JSON object with EXACT enum values for each feature.
 
-CRITICAL: This is NOT image description, NOT transcription, NOT layout analysis, NOT visual similarity measurement.
+CRITICAL RULES:
+1. Use ONLY the exact string values specified below
+2. Do NOT use synonyms, descriptions, or variations
+3. Return valid JSON without markdown code fences
+4. Do NOT include preamble or explanation text
 
-COMPLETELY IGNORE:
-- Words written, their meaning, topic, or content
-- Page layout and text positioning
-- Image quality, resolution, or lighting
-- Background texture or paper type
-- Ink color or pen type
-- Visual noise or artifacts
+FEATURE EXTRACTION INSTRUCTIONS:
 
-Extract ONLY these stylometric (writer-identifying) features:
+**1. SLANT** — Measure vertical stroke angle relative to baseline
+- If strokes lean noticeably left: return EXACTLY "left_lean"
+- If strokes lean noticeably right: return EXACTLY "right_lean"
+- If strokes are vertical or nearly vertical: return EXACTLY "upright"
+Decision rule: Estimate average angle. <80° = left_lean, 80-100° = upright, >100° = right_lean
 
-1. LETTER SLANT: Measure the dominant slant angle and its consistency across the sample
-2. STROKE WIDTH: Classify as thin, medium, or thick; note variation patterns
-3. PEN PRESSURE: Identify pressure patterns — light, medium, heavy, or varied; note where pressure changes occur
-4. LETTER SPACING: Classify as cramped, normal, or wide; measure consistency
-5. WORD SPACING: Classify as tight, normal, or wide; measure consistency
-6. BASELINE: Assess consistency — stable, drifting upward, drifting downward, or wavy
-7. HEIGHT RATIO: Measure uppercase-to-lowercase height proportion
-8. LOOP FORMATIONS: Describe loop style for letters l, h, b, d, f, g, y — open/closed, round/narrow, size
-9. LETTER CONNECTIONS: Describe connection style — fully connected (cursive), disconnected (print), or mixed
-10. DISTINCTIVE LETTER FORMATIONS: Analyze specific formation of at least 5 of these letters: a, e, g, o, r, s, d, b, f, l, h — note unique quirks
-11. WRITING RHYTHM: Assess overall rhythm and consistency — steady, rushed, deliberate, irregular
+**2. STROKE_WEIGHT** — Observe line thickness
+- If lines are thin and light: return EXACTLY "thin"
+- If lines are thick and heavy: return EXACTLY "thick"
+- Otherwise: return EXACTLY "medium"
 
-ALSO determine if the content is HANDWRITTEN or TYPED/PRINTED. Set is_handwritten to false if typed/printed.
+**3. LETTER_SPACING** — Measure space between letters within words
+- If letters touch or nearly touch: return EXACTLY "tight"
+- If letters have large gaps: return EXACTLY "wide"
+- Otherwise: return EXACTLY "normal"
 
-Return ONLY this JSON (no markdown, no extra text):
+**4. WORD_SPACING** — Measure space between words
+- If word gaps are narrow: return EXACTLY "tight"
+- If word gaps are large: return EXACTLY "wide"
+- Otherwise: return EXACTLY "normal"
+
+**5. BASELINE** — Observe line alignment
+- If writing follows a straight horizontal line: return EXACTLY "straight"
+- If writing curves or waves: return EXACTLY "wavy"
+- If baseline is inconsistent: return EXACTLY "variable"
+
+**6. HEIGHT_RATIO** — Compare uppercase to lowercase heights
+- If uppercase is 2x or taller than lowercase: return EXACTLY "tall"
+- If uppercase is 1.3-1.7x lowercase: return EXACTLY "moderate"
+- If uppercase barely taller: return EXACTLY "short"
+
+**7. WRITING_STYLE** — Identify connection pattern
+- If most letters connect in flowing cursive: return EXACTLY "cursive"
+- If letters are separated: return EXACTLY "print"
+- If partially connected: return EXACTLY "mixed"
+
+**8. LETTER_FORMATIONS** — For each letter (a, e, g, r, t, s), classify shape:
+- Smooth curves dominant: return EXACTLY "rounded"
+- Sharp angles dominant: return EXACTLY "angular"
+- Has decorative loops: return EXACTLY "looped"
+- Open tops/sides: return EXACTLY "open"
+- Fully enclosed: return EXACTLY "closed"
+- Plain/simple form: return EXACTLY "simple"
+- Mixed characteristics: return EXACTLY "mixed"
+
+**9. IS_HANDWRITTEN** — true if handwritten, false if typed/printed
+
+**10. CONFIDENCE_LEVEL** — 0.0 to 1.0 based on image quality
+
+REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
+
 {
-  "letter_formation": {
-    "overall_style": "<angular/rounded/mixed>",
-    "lowercase_characteristics": "<detailed stylometric description>",
-    "uppercase_characteristics": "<detailed stylometric description>",
-    "distinctive_letters": {"a": "<rounded/angular/looped/open/closed/simple/mixed>", "e": "<rounded/angular/looped/open/closed/simple/mixed>", "g": "<rounded/angular/looped/open/closed/simple/mixed>", "r": "<rounded/angular/looped/open/closed/simple/mixed>", "t": "<rounded/angular/looped/open/closed/simple/mixed>", "s": "<rounded/angular/looped/open/closed/simple/mixed>"}
+  "slant": "left_lean",
+  "stroke_weight": "medium",
+  "letter_spacing": "normal",
+  "word_spacing": "normal",
+  "baseline": "straight",
+  "height_ratio": "moderate",
+  "writing_style": "mixed",
+  "letter_formations": {
+    "a": "rounded",
+    "e": "open",
+    "g": "looped",
+    "r": "angular",
+    "t": "simple",
+    "s": "closed"
   },
-  "spacing": {
-    "letter_spacing": "<cramped/normal/wide>",
-    "word_spacing": "<tight/normal/wide>",
-    "spacing_consistency": "<uniform/varied>"
-  },
-  "stroke_characteristics": {
-    "pressure": "<light/medium/heavy/varied>",
-    "stroke_width": "<thin/medium/thick/varied>",
-    "connections": "<print/cursive/mixed>",
-    "pressure_change_pattern": "<description of where pressure varies>"
-  },
-  "slant_and_baseline": {
-    "slant_direction": "<left/vertical/right>",
-    "slant_consistency": "<consistent/slightly varied/highly varied>",
-    "baseline_behavior": "<stable/ascending/descending/wavy>",
-    "height_ratio_upper_lower": "<short/moderate/tall>"
-  },
-  "unique_identifiers": [
-    "<specific biometric feature 1>",
-    "<specific biometric feature 2>",
-    "<specific biometric feature 3>"
-  ],
-  "overall_description": "<2-3 sentence stylometric signature summary focusing ONLY on writing mechanics>",
-  "confidence_level": <decimal 0 to 1>,
-  "is_handwritten": <boolean>
+  "is_handwritten": true,
+  "confidence_level": 0.9
 }`;
+
+// ==================== FEATURE EXTRACTION (Stage 1) ====================
 
 async function extractPageFeatures(
   pageNumber: number,
@@ -302,7 +338,6 @@ async function extractPageFeatures(
   const aiData = await aiResponse.json();
   const responseText = aiData.choices?.[0]?.message?.content || '';
 
-  // Clean and parse JSON
   let cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
@@ -315,6 +350,9 @@ async function extractPageFeatures(
     const is_handwritten = parsed.is_handwritten !== false;
     const profile = normalizeProfile(parsed);
     console.log(`Page ${pageNumber}: extraction ${profile ? 'success' : 'failed normalization'}, handwritten: ${is_handwritten}`);
+    if (profile) {
+      console.log(`Page ${pageNumber} profile:`, JSON.stringify(profile));
+    }
     return { profile, is_handwritten };
   } catch (err) {
     console.error(`Page ${pageNumber}: JSON parse error:`, err);
@@ -322,64 +360,104 @@ async function extractPageFeatures(
   }
 }
 
-// ==================== DETERMINISTIC COMPARISON (Stage 2) ====================
+// ==================== WEIGHTED COMPARISON (Stage 2) ====================
 
-function compareProfiles(ref: HandwritingProfile, sub: HandwritingProfile): ComparisonResult {
-  let score = 0;
-  const matched: string[] = [];
-  const mismatched: string[] = [];
+interface WeightedComparisonResult {
+  similarity_score: number;
+  same_writer: boolean;
+  confidence_level: number;
+  key_observations: string[];
+  rare_feature_matches: number;
+  evidence_strength: string;
+}
 
-  // Slant (15 pts)
-  if (ref.slant === sub.slant) { score += 15; matched.push('slant'); }
-  else { mismatched.push(`slant (ref:${ref.slant} vs sub:${sub.slant})`); }
+function compareProfilesWeighted(
+  ref: HandwritingProfile,
+  sub: HandwritingProfile,
+  weightMap: Map<string, number>
+): WeightedComparisonResult {
+  let rawScore = 0;
+  const matches: string[] = [];
+  const differences: string[] = [];
+  let rareMatchCount = 0;
 
-  // Stroke Weight (10 pts)
-  if (ref.stroke_weight === sub.stroke_weight) { score += 10; matched.push('stroke_weight'); }
-  else { mismatched.push(`stroke_weight (ref:${ref.stroke_weight} vs sub:${sub.stroke_weight})`); }
+  const compareFeature = (
+    category: string,
+    refValue: string,
+    subValue: string,
+    maxPoints: number,
+    featureName: string
+  ): number => {
+    if (refValue !== subValue) {
+      differences.push(`${featureName} differs (${refValue} vs ${subValue})`);
+      return 0;
+    }
+    const key = `${category}:${refValue}`;
+    const weight = weightMap.get(key) || 0.5;
+    const points = maxPoints * weight;
 
-  // Letter Spacing (15 pts)
-  if (ref.letter_spacing === sub.letter_spacing) { score += 15; matched.push('letter_spacing'); }
-  else { mismatched.push(`letter_spacing (ref:${ref.letter_spacing} vs sub:${sub.letter_spacing})`); }
+    if (weight >= 0.7) {
+      rareMatchCount++;
+      matches.push(`${featureName}: ${refValue} [RARE, +${points.toFixed(1)}pts]`);
+    } else {
+      matches.push(`${featureName}: ${refValue} [+${points.toFixed(1)}pts]`);
+    }
+    return points;
+  };
 
-  // Letter Formations (6 x 5 = 30 pts)
+  rawScore += compareFeature('slant', ref.slant, sub.slant, 15, 'Slant');
+  rawScore += compareFeature('stroke_weight', ref.stroke_weight, sub.stroke_weight, 10, 'Stroke weight');
+  rawScore += compareFeature('letter_spacing', ref.letter_spacing, sub.letter_spacing, 15, 'Letter spacing');
+  rawScore += compareFeature('word_spacing', ref.word_spacing, sub.word_spacing, 10, 'Word spacing');
+  rawScore += compareFeature('baseline', ref.baseline, sub.baseline, 10, 'Baseline');
+  rawScore += compareFeature('height_ratio', ref.height_ratio, sub.height_ratio, 10, 'Height ratio');
+  rawScore += compareFeature('writing_style', ref.writing_style, sub.writing_style, 10, 'Writing style');
+
+  // Letter formations (30 points total, 5 per letter)
   const letters = ['a', 'e', 'g', 'r', 't', 's'] as const;
-  let letterMatches = 0;
   for (const letter of letters) {
-    const refVal = ref.letter_formations[letter]?.toLowerCase().trim();
-    const subVal = sub.letter_formations[letter]?.toLowerCase().trim();
-    if (refVal && subVal && refVal !== "unknown" && subVal !== "unknown" && refVal === subVal) {
-      score += 5;
-      letterMatches++;
+    const refShape = ref.letter_formations[letter];
+    const subShape = sub.letter_formations[letter];
+    if (refShape && subShape) {
+      rawScore += compareFeature('letter_shape', refShape, subShape, 5, `Letter ${letter}`);
     }
   }
-  if (letterMatches > 0) matched.push(`letter_formations (${letterMatches}/6)`);
-  if (letterMatches < 6) mismatched.push(`letter_formations (${6 - letterMatches}/6 differ)`);
 
-  // Baseline (10 pts)
-  if (ref.baseline === sub.baseline) { score += 10; matched.push('baseline'); }
-  else { mismatched.push(`baseline (ref:${ref.baseline} vs sub:${sub.baseline})`); }
+  // Confidence adjustment
+  const refConfidence = ref.confidence_level || 0.8;
+  const subConfidence = sub.confidence_level || 0.8;
+  const avgConfidence = (refConfidence + subConfidence) / 2;
+  const confidenceAdjusted = rawScore * avgConfidence;
+  const finalScore = Math.round(confidenceAdjusted);
 
-  // Height Ratio (10 pts)
-  if (ref.height_ratio === sub.height_ratio) { score += 10; matched.push('height_ratio'); }
-  else { mismatched.push(`height_ratio (ref:${ref.height_ratio} vs sub:${sub.height_ratio})`); }
+  // Dynamic threshold
+  let threshold = 70;
+  threshold -= rareMatchCount * 3;
+  if (avgConfidence < 0.7) threshold += 5;
+  threshold = Math.max(60, Math.min(threshold, 80));
 
-  // Writing Style (10 pts)
-  if (ref.writing_style === sub.writing_style) { score += 10; matched.push('writing_style'); }
-  else { mismatched.push(`writing_style (ref:${ref.writing_style} vs sub:${sub.writing_style})`); }
+  let evidenceStrength = 'weak';
+  if (rareMatchCount >= 4) evidenceStrength = 'very_strong';
+  else if (rareMatchCount >= 2) evidenceStrength = 'strong';
+  else if (rareMatchCount >= 1) evidenceStrength = 'moderate';
 
-  const confidence_level = (ref.confidence_level + sub.confidence_level) / 2;
-
-  const key_observations = [
-    `Matched: ${matched.join(', ') || 'none'}`,
-    `Mismatched: ${mismatched.join(', ') || 'none'}`,
-    `Score: ${score}/100`,
+  const topMatches = matches.slice(0, 6);
+  const topDifferences = differences.slice(0, 3);
+  const observations = [
+    ...topMatches,
+    ...topDifferences,
+    `[Raw: ${rawScore.toFixed(1)}, Conf: ${(avgConfidence * 100).toFixed(0)}%, Final: ${finalScore}, Thresh: ${threshold}, Rare: ${rareMatchCount}]`
   ];
 
+  console.log(`Weighted comparison: raw=${rawScore.toFixed(1)}, final=${finalScore}, threshold=${threshold}, rare=${rareMatchCount}, evidence=${evidenceStrength}`);
+
   return {
-    similarity_score: score,
-    same_writer: score >= 70,
-    confidence_level,
-    key_observations,
+    similarity_score: finalScore,
+    same_writer: finalScore >= threshold,
+    confidence_level: avgConfidence,
+    key_observations: observations,
+    rare_feature_matches: rareMatchCount,
+    evidence_strength: evidenceStrength,
   };
 }
 
@@ -536,7 +614,7 @@ serve(async (req) => {
 
     const imageUrls: string[] = file_urls || (file_url ? [file_url] : []);
 
-    console.log('=== DETERMINISTIC HANDWRITING VERIFICATION START ===');
+    console.log('=== WEIGHTED PROBABILISTIC HANDWRITING VERIFICATION v6.0 START ===');
     console.log('Submission ID:', submission_id);
     console.log('Image URLs:', imageUrls.length, 'pages');
     console.log('Student Profile ID:', student_profile_id);
@@ -550,6 +628,22 @@ serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // Load feature statistics for weighted comparison
+    const { data: featureStats, error: statsError } = await supabase
+      .from('feature_statistics')
+      .select('feature_category, feature_value, discriminative_weight');
+
+    if (statsError) {
+      console.error('Failed to load feature statistics:', statsError);
+    }
+
+    const weightMap = new Map<string, number>();
+    featureStats?.forEach((stat: any) => {
+      const key = `${stat.feature_category}:${stat.feature_value}`;
+      weightMap.set(key, stat.discriminative_weight);
+    });
+    console.log('Loaded', weightMap.size, 'feature weights');
 
     // Ownership verification
     const { data: ownerCheck } = await supabase
@@ -605,7 +699,7 @@ serve(async (req) => {
           status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '5.0-deterministic',
+            algorithm_version: '6.0-weighted-probabilistic',
             error_type: fallback.error_type,
             reason: fallback.message,
             page_count: imageUrls.length,
@@ -639,7 +733,7 @@ serve(async (req) => {
           status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '5.0-deterministic',
+            algorithm_version: '6.0-weighted-probabilistic',
             error_type: 'parse_error',
             reason: fallback.message,
             page_count: imageUrls.length,
@@ -663,6 +757,8 @@ serve(async (req) => {
     const pageResults: PageResult[] = [];
     let hasTypedContent = false;
     let hasDifferentWriter = false;
+    let totalRareMatches = 0;
+    let overallEvidenceStrength = 'weak';
 
     for (let i = 0; i < imageUrls.length; i++) {
       const pageUrl = imageUrls[i];
@@ -721,9 +817,14 @@ serve(async (req) => {
           continue;
         }
 
-        // Stage 2: Deterministic comparison
-        const comparison = compareProfiles(referenceProfile, submissionProfile);
-        console.log(`Page ${pageNum} deterministic result:`, comparison);
+        // Stage 2: Weighted deterministic comparison
+        const comparison = compareProfilesWeighted(referenceProfile, submissionProfile, weightMap);
+        console.log(`Page ${pageNum} weighted result:`, JSON.stringify(comparison));
+
+        totalRareMatches += comparison.rare_feature_matches;
+        if (comparison.evidence_strength === 'very_strong' || comparison.evidence_strength === 'strong') {
+          overallEvidenceStrength = comparison.evidence_strength;
+        }
 
         const confidenceStr = comparison.confidence_level >= 0.7 ? 'high' 
           : comparison.confidence_level >= 0.4 ? 'medium' : 'low';
@@ -795,6 +896,8 @@ serve(async (req) => {
     console.log('Has Typed Content:', hasTypedContent);
     console.log('Risk Level:', riskLevel);
     console.log('Status:', status);
+    console.log('Total Rare Matches:', totalRareMatches);
+    console.log('Evidence Strength:', overallEvidenceStrength);
 
     // Update submission with results
     const { error: updateError } = await supabase
@@ -806,7 +909,7 @@ serve(async (req) => {
         status: status,
         verified_at: new Date().toISOString(),
         ai_analysis_details: {
-          algorithm_version: '5.0-deterministic',
+          algorithm_version: '6.0-weighted-probabilistic',
           page_count: pageResults.length,
           overall_similarity_score: overallSimilarity,
           same_writer: overallSameWriter,
@@ -816,6 +919,8 @@ serve(async (req) => {
           aggregation_method: 'conservative_minimum',
           page_results: pageResults,
           final_reasoning: finalReasoning,
+          rare_feature_matches: totalRareMatches,
+          evidence_strength: overallEvidenceStrength,
           critical_flags: [
             ...(hasTypedContent ? ['typed_content_detected'] : []),
             ...(hasDifferentWriter ? ['different_writer_detected'] : [])

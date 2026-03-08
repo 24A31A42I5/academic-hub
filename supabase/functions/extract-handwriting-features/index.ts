@@ -11,8 +11,127 @@ const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-// This function trains Gemini to learn a student's unique handwriting style
-// by analyzing their reference sample and storing a detailed profile
+// ==================== STRICT ENUM DEFINITIONS ====================
+
+const VALID_ENUMS: Record<string, string[]> = {
+  slant: ['left_lean', 'right_lean', 'upright'],
+  stroke_weight: ['thin', 'medium', 'thick'],
+  letter_spacing: ['tight', 'normal', 'wide'],
+  word_spacing: ['tight', 'normal', 'wide'],
+  baseline: ['straight', 'wavy', 'variable'],
+  height_ratio: ['short', 'moderate', 'tall'],
+  writing_style: ['cursive', 'print', 'mixed'],
+  letter_shape: ['rounded', 'angular', 'looped', 'open', 'closed', 'simple', 'mixed'],
+};
+
+function validateProfile(profile: any): boolean {
+  for (const field of ['slant', 'stroke_weight', 'letter_spacing', 'word_spacing', 'baseline', 'height_ratio', 'writing_style']) {
+    if (!VALID_ENUMS[field].includes(profile[field])) {
+      console.error(`Invalid ${field}:`, profile[field]);
+      return false;
+    }
+  }
+  const letters = ['a', 'e', 'g', 'r', 't', 's'];
+  for (const letter of letters) {
+    const shape = profile.letter_formations?.[letter];
+    if (shape && !VALID_ENUMS.letter_shape.includes(shape)) {
+      console.error(`Invalid shape for letter ${letter}:`, shape);
+      return false;
+    }
+  }
+  return true;
+}
+
+// ==================== EXTRACTION PROMPT ====================
+
+const EXTRACTION_PROMPT = `You are a forensic handwriting analyst extracting biometric features from a handwriting sample. You MUST return a structured JSON object with EXACT enum values for each feature.
+
+CRITICAL RULES:
+1. Use ONLY the exact string values specified below
+2. Do NOT use synonyms, descriptions, or variations
+3. Return valid JSON without markdown code fences
+4. Do NOT include preamble or explanation text
+
+FEATURE EXTRACTION INSTRUCTIONS:
+
+**1. SLANT** — Measure vertical stroke angle relative to baseline
+- If strokes lean noticeably left: return EXACTLY "left_lean"
+- If strokes lean noticeably right: return EXACTLY "right_lean"
+- If strokes are vertical or nearly vertical: return EXACTLY "upright"
+Decision rule: Estimate average angle. <80° = left_lean, 80-100° = upright, >100° = right_lean
+
+**2. STROKE_WEIGHT** — Observe line thickness
+- If lines are thin and light: return EXACTLY "thin"
+- If lines are thick and heavy: return EXACTLY "thick"
+- Otherwise: return EXACTLY "medium"
+Decision rule: Compare to typical ballpoint pen. Noticeably thinner = thin, noticeably thicker = thick
+
+**3. LETTER_SPACING** — Measure space between letters within words
+- If letters touch or nearly touch: return EXACTLY "tight"
+- If letters have large gaps (>5mm): return EXACTLY "wide"
+- Otherwise: return EXACTLY "normal"
+
+**4. WORD_SPACING** — Measure space between words
+- If word gaps are narrow (<8mm): return EXACTLY "tight"
+- If word gaps are large (>15mm): return EXACTLY "wide"
+- Otherwise: return EXACTLY "normal"
+
+**5. BASELINE** — Observe line alignment
+- If writing follows a straight horizontal line: return EXACTLY "straight"
+- If writing curves or waves: return EXACTLY "wavy"
+- If baseline is inconsistent: return EXACTLY "variable"
+
+**6. HEIGHT_RATIO** — Compare uppercase to lowercase heights
+- If uppercase is 2x or taller than lowercase: return EXACTLY "tall"
+- If uppercase is 1.3-1.7x lowercase: return EXACTLY "moderate"
+- If uppercase barely taller: return EXACTLY "short"
+
+**7. WRITING_STYLE** — Identify connection pattern
+- If most letters connect in flowing cursive: return EXACTLY "cursive"
+- If letters are separated: return EXACTLY "print"
+- If partially connected: return EXACTLY "mixed"
+
+**8. LETTER_FORMATIONS** — For each letter (a, e, g, r, t, s), classify shape:
+- Smooth curves dominant: return EXACTLY "rounded"
+- Sharp angles dominant: return EXACTLY "angular"
+- Has decorative loops: return EXACTLY "looped"
+- Open tops/sides: return EXACTLY "open"
+- Fully enclosed: return EXACTLY "closed"
+- Plain/simple form: return EXACTLY "simple"
+- Mixed characteristics: return EXACTLY "mixed"
+
+**9. IS_HANDWRITTEN** — Content type detection
+- Handwritten text: return true
+- Typed/printed text: return false
+
+**10. CONFIDENCE_LEVEL** — Feature visibility (0.0 to 1.0)
+- Clear, well-lit image with distinct features: 0.9
+- Slightly blurry or low contrast: 0.7
+- Poor quality or unclear features: 0.5
+
+REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
+
+{
+  "slant": "left_lean",
+  "stroke_weight": "medium",
+  "letter_spacing": "normal",
+  "word_spacing": "normal",
+  "baseline": "straight",
+  "height_ratio": "moderate",
+  "writing_style": "mixed",
+  "letter_formations": {
+    "a": "rounded",
+    "e": "open",
+    "g": "looped",
+    "r": "angular",
+    "t": "simple",
+    "s": "closed"
+  },
+  "is_handwritten": true,
+  "confidence_level": 0.9
+}`;
+
+// ==================== HELPERS ====================
 
 async function fetchFileAsBase64(url: string): Promise<string> {
   console.log('Fetching file:', url);
@@ -24,6 +143,8 @@ async function fetchFileAsBase64(url: string): Promise<string> {
   return encode(arrayBuffer);
 }
 
+// ==================== MAIN HANDLER ====================
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -32,7 +153,7 @@ serve(async (req) => {
   try {
     const { image_url, student_details_id } = await req.json();
 
-    console.log('=== GEMINI HANDWRITING TRAINING START ===');
+    console.log('=== HANDWRITING FEATURE EXTRACTION v6.0 START ===');
     console.log('Student details ID:', student_details_id);
     console.log('Image URL:', image_url);
 
@@ -46,72 +167,9 @@ serve(async (req) => {
 
     // Fetch image as base64
     const imageBase64 = await fetchFileAsBase64(image_url);
-    console.log('Image fetched, size:', imageBase64.length);
+    console.log('Image fetched, base64 length:', imageBase64.length);
 
-    // Build the prompt for Gemini to deeply learn this student's handwriting
-    const trainingPrompt = `You are a FORENSIC DOCUMENT EXAMINER creating a biometric writer profile for writer identification purposes.
-
-CRITICAL: This is NOT image description, NOT transcription, NOT layout analysis, NOT visual similarity measurement.
-
-COMPLETELY IGNORE:
-- Words written, their meaning, topic, or content
-- Page layout and text positioning
-- Image quality, resolution, or lighting
-- Background texture or paper type
-- Ink color or pen type
-- Visual noise or artifacts
-
-Extract ONLY these stylometric (writer-identifying) features:
-
-1. LETTER SLANT: Measure the dominant slant angle and its consistency across the sample
-2. STROKE WIDTH: Classify as thin, medium, or thick; note variation patterns
-3. PEN PRESSURE: Identify pressure patterns — light, medium, heavy, or varied; note where pressure changes occur
-4. LETTER SPACING: Classify as cramped, normal, or wide; measure consistency
-5. WORD SPACING: Classify as tight, normal, or wide; measure consistency
-6. BASELINE: Assess consistency — stable, drifting upward, drifting downward, or wavy
-7. HEIGHT RATIO: Measure uppercase-to-lowercase height proportion
-8. LOOP FORMATIONS: Describe loop style for letters l, h, b, d, f, g, y — open/closed, round/narrow, size
-9. LETTER CONNECTIONS: Describe connection style — fully connected (cursive), disconnected (print), or mixed
-10. DISTINCTIVE LETTER FORMATIONS: Analyze specific formation of at least 5 of these letters: a, e, g, o, r, s, d, b, f, l, h — note unique quirks
-11. WRITING RHYTHM: Assess overall rhythm and consistency — steady, rushed, deliberate, irregular
-
-Return ONLY this JSON (no markdown, no extra text):
-{
-  "letter_formation": {
-    "overall_style": "<angular/rounded/mixed>",
-    "lowercase_characteristics": "<detailed stylometric description>",
-    "uppercase_characteristics": "<detailed stylometric description>",
-    "distinctive_letters": {"<letter>": "<formation description>", ...for at least 5 letters}
-  },
-  "spacing": {
-    "letter_spacing": "<cramped/normal/wide>",
-    "word_spacing": "<tight/normal/wide>",
-    "spacing_consistency": "<uniform/varied>"
-  },
-  "stroke_characteristics": {
-    "pressure": "<light/medium/heavy/varied>",
-    "stroke_width": "<thin/medium/thick/varied>",
-    "connections": "<print/cursive/mixed>",
-    "pressure_change_pattern": "<description of where pressure varies>"
-  },
-  "slant_and_baseline": {
-    "slant_direction": "<left/vertical/right>",
-    "slant_consistency": "<consistent/slightly varied/highly varied>",
-    "baseline_behavior": "<stable/ascending/descending/wavy>",
-    "height_ratio_upper_lower": "<ratio description>"
-  },
-  "unique_identifiers": [
-    "<specific biometric feature 1>",
-    "<specific biometric feature 2>",
-    "<specific biometric feature 3>",
-    "<specific biometric feature 4>",
-    "<specific biometric feature 5>"
-  ],
-  "overall_description": "<2-3 sentence stylometric signature summary focusing ONLY on writing mechanics>",
-  "confidence_level": <decimal 0 to 1>
-}`;
-
-    console.log('Calling Gemini AI to learn handwriting style...');
+    console.log('Calling Gemini AI for strict enum extraction...');
 
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -125,7 +183,7 @@ Return ONLY this JSON (no markdown, no extra text):
           {
             role: 'user',
             content: [
-              { type: 'text', text: trainingPrompt },
+              { type: 'text', text: EXTRACTION_PROMPT },
               {
                 type: 'image_url',
                 image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
@@ -139,46 +197,49 @@ Return ONLY this JSON (no markdown, no extra text):
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
       console.error('AI Gateway error:', aiResponse.status, errorText);
-      
-      if (aiResponse.status === 429) {
-        throw new Error('Rate limit exceeded. Please try again later.');
-      }
-      if (aiResponse.status === 402) {
-        throw new Error('AI credits exhausted. Please add credits to continue.');
-      }
+      if (aiResponse.status === 429) throw new Error('Rate limit exceeded. Please try again later.');
+      if (aiResponse.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
       throw new Error(`AI analysis failed: ${aiResponse.status}`);
     }
 
     const aiData = await aiResponse.json();
     const responseText = aiData.choices?.[0]?.message?.content || '';
-    console.log('Gemini training response received');
+    console.log('Gemini response received, length:', responseText.length);
 
     // Parse the handwriting profile
     let handwritingProfile: any;
     try {
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('No JSON found in response');
       }
       handwritingProfile = JSON.parse(jsonMatch[0]);
-      
-      // Validate required fields exist
-      if (!handwritingProfile.letter_formation || !handwritingProfile.unique_identifiers) {
-        throw new Error('Missing required profile fields');
+
+      // Validate strict enum values
+      if (!validateProfile(handwritingProfile)) {
+        throw new Error('AI returned invalid enum values - strict validation failed');
+      }
+
+      // Ensure confidence_level is a number in range
+      if (typeof handwritingProfile.confidence_level !== 'number') {
+        handwritingProfile.confidence_level = 0.5;
+      } else {
+        handwritingProfile.confidence_level = Math.max(0, Math.min(1, handwritingProfile.confidence_level));
       }
 
       // Add metadata
-      handwritingProfile.version = '3.0-gemini-trained';
+      handwritingProfile.version = '6.0-weighted';
       handwritingProfile.trained_at = new Date().toISOString();
       handwritingProfile.reference_image_url = image_url;
 
     } catch (parseError) {
-      console.error('Failed to parse AI response:', parseError);
+      console.error('Failed to parse/validate AI response:', parseError);
       console.log('Raw response:', responseText);
       throw new Error('Failed to create handwriting profile from image');
     }
 
-    console.log('Handwriting profile created:', JSON.stringify(handwritingProfile, null, 2));
+    console.log('Validated handwriting profile:', JSON.stringify(handwritingProfile, null, 2));
 
     // Create Supabase client and update student_details
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -196,13 +257,13 @@ Return ONLY this JSON (no markdown, no extra text):
       throw new Error('Failed to save handwriting profile');
     }
 
-    console.log('=== GEMINI HANDWRITING TRAINING COMPLETE ===');
+    console.log('=== HANDWRITING FEATURE EXTRACTION v6.0 COMPLETE ===');
 
     return new Response(JSON.stringify({
       success: true,
-      message: 'Handwriting profile created successfully',
-      profile_version: '3.0-gemini-trained',
-      unique_identifiers_count: handwritingProfile.unique_identifiers?.length || 0,
+      message: 'Handwriting profile created successfully with strict enum validation',
+      profile_version: '6.0-weighted',
+      features_validated: true,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
