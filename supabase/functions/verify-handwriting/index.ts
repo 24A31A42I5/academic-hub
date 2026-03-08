@@ -309,13 +309,57 @@ REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
 
 // ==================== FEATURE EXTRACTION (Stage 1) ====================
 
-async function extractPageFeatures(
+const LETTER_KEYS = ['a', 'e', 'g', 'r', 't', 's'] as const;
+const EXTRACTION_ATTEMPTS = 3;
+
+function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
+  if (values.length === 0) return fallback;
+
+  const counts = new Map<T, number>();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  let bestValue = fallback;
+  let bestCount = -1;
+  for (const [value, count] of counts.entries()) {
+    if (count > bestCount) {
+      bestValue = value;
+      bestCount = count;
+    }
+  }
+
+  return bestValue;
+}
+
+function buildConsensusProfile(profiles: HandwritingProfile[]): HandwritingProfile {
+  const base = profiles[0];
+
+  return {
+    slant: pickMostFrequent(profiles.map((p) => p.slant), base.slant),
+    stroke_weight: pickMostFrequent(profiles.map((p) => p.stroke_weight), base.stroke_weight),
+    letter_spacing: pickMostFrequent(profiles.map((p) => p.letter_spacing), base.letter_spacing),
+    word_spacing: pickMostFrequent(profiles.map((p) => p.word_spacing), base.word_spacing),
+    baseline: pickMostFrequent(profiles.map((p) => p.baseline), base.baseline),
+    height_ratio: pickMostFrequent(profiles.map((p) => p.height_ratio), base.height_ratio),
+    writing_style: pickMostFrequent(profiles.map((p) => p.writing_style), base.writing_style),
+    letter_formations: {
+      a: pickMostFrequent(profiles.map((p) => p.letter_formations.a), base.letter_formations.a),
+      e: pickMostFrequent(profiles.map((p) => p.letter_formations.e), base.letter_formations.e),
+      g: pickMostFrequent(profiles.map((p) => p.letter_formations.g), base.letter_formations.g),
+      r: pickMostFrequent(profiles.map((p) => p.letter_formations.r), base.letter_formations.r),
+      t: pickMostFrequent(profiles.map((p) => p.letter_formations.t), base.letter_formations.t),
+      s: pickMostFrequent(profiles.map((p) => p.letter_formations.s), base.letter_formations.s),
+    },
+    confidence_level: Math.max(0, Math.min(1, profiles.reduce((sum, p) => sum + (p.confidence_level || 0.8), 0) / profiles.length)),
+  };
+}
+
+async function extractPageFeaturesOnce(
   pageNumber: number,
   imageBase64: string,
   apiKey: string
 ): Promise<{ profile: HandwritingProfile | null; is_handwritten: boolean }> {
-  console.log(`Extracting features for page ${pageNumber}...`);
-
   const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -355,7 +399,6 @@ async function extractPageFeatures(
   let cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    console.error(`Page ${pageNumber}: No JSON found in AI response`);
     return { profile: null, is_handwritten: true };
   }
 
@@ -363,15 +406,53 @@ async function extractPageFeatures(
     const parsed = JSON.parse(jsonMatch[0]);
     const is_handwritten = parsed.is_handwritten !== false;
     const profile = normalizeProfile(parsed);
-    console.log(`Page ${pageNumber}: extraction ${profile ? 'success' : 'failed normalization'}, handwritten: ${is_handwritten}`);
-    if (profile) {
-      console.log(`Page ${pageNumber} profile:`, JSON.stringify(profile));
-    }
     return { profile, is_handwritten };
-  } catch (err) {
-    console.error(`Page ${pageNumber}: JSON parse error:`, err);
+  } catch {
     return { profile: null, is_handwritten: true };
   }
+}
+
+async function extractPageFeatures(
+  pageNumber: number,
+  imageBase64: string,
+  apiKey: string
+): Promise<{ profile: HandwritingProfile | null; is_handwritten: boolean }> {
+  console.log(`Extracting features for page ${pageNumber} with ${EXTRACTION_ATTEMPTS} attempts...`);
+
+  const successfulProfiles: HandwritingProfile[] = [];
+  let nonHandwrittenVotes = 0;
+
+  for (let attempt = 1; attempt <= EXTRACTION_ATTEMPTS; attempt++) {
+    const result = await extractPageFeaturesOnce(pageNumber, imageBase64, apiKey);
+
+    if (!result.is_handwritten) {
+      nonHandwrittenVotes++;
+    }
+
+    if (result.profile) {
+      successfulProfiles.push(result.profile);
+    }
+
+    console.log(`Page ${pageNumber}: extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} -> ${result.profile ? 'ok' : 'failed'}, handwritten=${result.is_handwritten}`);
+  }
+
+  if (nonHandwrittenVotes >= 2) {
+    return { profile: null, is_handwritten: false };
+  }
+
+  if (successfulProfiles.length === 0) {
+    console.error(`Page ${pageNumber}: all extraction attempts failed`);
+    return { profile: null, is_handwritten: true };
+  }
+
+  const profile = successfulProfiles.length === 1
+    ? successfulProfiles[0]
+    : buildConsensusProfile(successfulProfiles);
+
+  console.log(`Page ${pageNumber}: extraction consensus from ${successfulProfiles.length}/${EXTRACTION_ATTEMPTS} attempts`);
+  console.log(`Page ${pageNumber} profile:`, JSON.stringify(profile));
+
+  return { profile, is_handwritten: true };
 }
 
 // ==================== WEIGHTED COMPARISON (Stage 2) ====================
