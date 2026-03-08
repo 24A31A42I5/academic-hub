@@ -179,6 +179,9 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
+        temperature: 0,
+        top_p: 0.1,
+        response_format: { type: 'json_object' },
         messages: [
           {
             role: 'user',
