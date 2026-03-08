@@ -253,6 +253,7 @@ const StudentsPage = () => {
       section: details?.section || '',
       semester: details?.semester || 'I',
       roll_number: details?.roll_number || '',
+      password: '',
     });
   };
 
