@@ -42,6 +42,52 @@ function validateProfile(profile: any): boolean {
   return true;
 }
 
+const EXTRACTION_ATTEMPTS = 3;
+
+function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
+  if (values.length === 0) return fallback;
+
+  const counts = new Map<T, number>();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  let best = fallback;
+  let bestCount = -1;
+  for (const [value, count] of counts.entries()) {
+    if (count > bestCount) {
+      best = value;
+      bestCount = count;
+    }
+  }
+
+  return best;
+}
+
+function buildConsensusProfile(profiles: any[]): any {
+  const base = profiles[0];
+
+  return {
+    slant: pickMostFrequent(profiles.map((p) => p.slant), base.slant),
+    stroke_weight: pickMostFrequent(profiles.map((p) => p.stroke_weight), base.stroke_weight),
+    letter_spacing: pickMostFrequent(profiles.map((p) => p.letter_spacing), base.letter_spacing),
+    word_spacing: pickMostFrequent(profiles.map((p) => p.word_spacing), base.word_spacing),
+    baseline: pickMostFrequent(profiles.map((p) => p.baseline), base.baseline),
+    height_ratio: pickMostFrequent(profiles.map((p) => p.height_ratio), base.height_ratio),
+    writing_style: pickMostFrequent(profiles.map((p) => p.writing_style), base.writing_style),
+    letter_formations: {
+      a: pickMostFrequent(profiles.map((p) => p.letter_formations?.a ?? 'simple'), base.letter_formations?.a ?? 'simple'),
+      e: pickMostFrequent(profiles.map((p) => p.letter_formations?.e ?? 'simple'), base.letter_formations?.e ?? 'simple'),
+      g: pickMostFrequent(profiles.map((p) => p.letter_formations?.g ?? 'simple'), base.letter_formations?.g ?? 'simple'),
+      r: pickMostFrequent(profiles.map((p) => p.letter_formations?.r ?? 'simple'), base.letter_formations?.r ?? 'simple'),
+      t: pickMostFrequent(profiles.map((p) => p.letter_formations?.t ?? 'simple'), base.letter_formations?.t ?? 'simple'),
+      s: pickMostFrequent(profiles.map((p) => p.letter_formations?.s ?? 'simple'), base.letter_formations?.s ?? 'simple'),
+    },
+    is_handwritten: true,
+    confidence_level: Math.max(0, Math.min(1, profiles.reduce((sum, p) => sum + (p.confidence_level ?? 0.8), 0) / profiles.length)),
+  };
+}
+
 // ==================== EXTRACTION PROMPT ====================
 
 const EXTRACTION_PROMPT = `You are a forensic handwriting analyst extracting biometric features from a handwriting sample. You MUST return a structured JSON object with EXACT enum values for each feature.
@@ -169,76 +215,102 @@ serve(async (req) => {
     const imageBase64 = await fetchFileAsBase64(image_url);
     console.log('Image fetched, base64 length:', imageBase64.length);
 
-    console.log('Calling Gemini AI for strict enum extraction...');
+    console.log(`Calling Gemini AI for strict enum extraction (${EXTRACTION_ATTEMPTS} attempts)...`);
 
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: EXTRACTION_PROMPT },
+    const extractedProfiles: any[] = [];
+    let nonHandwrittenVotes = 0;
+
+    for (let attempt = 1; attempt <= EXTRACTION_ATTEMPTS; attempt++) {
+      try {
+        const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            temperature: 0,
+            top_p: 0.1,
+            response_format: { type: 'json_object' },
+            messages: [
               {
-                type: 'image_url',
-                image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
+                role: 'user',
+                content: [
+                  { type: 'text', text: EXTRACTION_PROMPT },
+                  {
+                    type: 'image_url',
+                    image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
+                  }
+                ]
               }
-            ]
-          }
-        ],
-      }),
-    });
+            ],
+          }),
+        });
 
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('AI Gateway error:', aiResponse.status, errorText);
-      if (aiResponse.status === 429) throw new Error('Rate limit exceeded. Please try again later.');
-      if (aiResponse.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
-      throw new Error(`AI analysis failed: ${aiResponse.status}`);
+        if (!aiResponse.ok) {
+          const errorText = await aiResponse.text();
+          console.error('AI Gateway error:', aiResponse.status, errorText);
+          if (aiResponse.status === 429) throw new Error('Rate limit exceeded. Please try again later.');
+          if (aiResponse.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
+          throw new Error(`AI analysis failed: ${aiResponse.status}`);
+        }
+
+        const aiData = await aiResponse.json();
+        const responseText = aiData.choices?.[0]?.message?.content || '';
+        console.log(`Gemini response attempt ${attempt}/${EXTRACTION_ATTEMPTS}, length:`, responseText.length);
+
+        const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          console.error(`No JSON found in attempt ${attempt}`);
+          continue;
+        }
+
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        if (parsed.is_handwritten === false) {
+          nonHandwrittenVotes++;
+        }
+
+        // Validate strict enum values
+        if (!validateProfile(parsed)) {
+          console.error(`Strict enum validation failed for attempt ${attempt}`);
+          continue;
+        }
+
+        // Ensure confidence_level is a number in range
+        if (typeof parsed.confidence_level !== 'number') {
+          parsed.confidence_level = 0.5;
+        } else {
+          parsed.confidence_level = Math.max(0, Math.min(1, parsed.confidence_level));
+        }
+
+        extractedProfiles.push(parsed);
+        console.log(`Extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} succeeded`);
+      } catch (attemptError) {
+        console.error(`Extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} failed:`, attemptError);
+      }
     }
 
-    const aiData = await aiResponse.json();
-    const responseText = aiData.choices?.[0]?.message?.content || '';
-    console.log('Gemini response received, length:', responseText.length);
+    if (nonHandwrittenVotes >= 2) {
+      throw new Error('Uploaded sample appears typed/printed instead of handwritten');
+    }
 
-    // Parse the handwriting profile
-    let handwritingProfile: any;
-    try {
-      const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-      const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No JSON found in response');
-      }
-      handwritingProfile = JSON.parse(jsonMatch[0]);
-
-      // Validate strict enum values
-      if (!validateProfile(handwritingProfile)) {
-        throw new Error('AI returned invalid enum values - strict validation failed');
-      }
-
-      // Ensure confidence_level is a number in range
-      if (typeof handwritingProfile.confidence_level !== 'number') {
-        handwritingProfile.confidence_level = 0.5;
-      } else {
-        handwritingProfile.confidence_level = Math.max(0, Math.min(1, handwritingProfile.confidence_level));
-      }
-
-      // Add metadata
-      handwritingProfile.version = '6.0-weighted';
-      handwritingProfile.trained_at = new Date().toISOString();
-      handwritingProfile.reference_image_url = image_url;
-
-    } catch (parseError) {
-      console.error('Failed to parse/validate AI response:', parseError);
-      console.log('Raw response:', responseText);
+    if (extractedProfiles.length === 0) {
       throw new Error('Failed to create handwriting profile from image');
     }
 
+    const handwritingProfile = extractedProfiles.length === 1
+      ? extractedProfiles[0]
+      : buildConsensusProfile(extractedProfiles);
+
+    // Add metadata
+    handwritingProfile.version = '6.0-weighted';
+    handwritingProfile.trained_at = new Date().toISOString();
+    handwritingProfile.reference_image_url = image_url;
+
+    console.log(`Built profile consensus from ${extractedProfiles.length}/${EXTRACTION_ATTEMPTS} successful attempts`);
     console.log('Validated handwriting profile:', JSON.stringify(handwritingProfile, null, 2));
 
     // Create Supabase client and update student_details

@@ -309,13 +309,56 @@ REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
 
 // ==================== FEATURE EXTRACTION (Stage 1) ====================
 
-async function extractPageFeatures(
+const EXTRACTION_ATTEMPTS = 3;
+
+function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
+  if (values.length === 0) return fallback;
+
+  const counts = new Map<T, number>();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  let bestValue = fallback;
+  let bestCount = -1;
+  for (const [value, count] of counts.entries()) {
+    if (count > bestCount) {
+      bestValue = value;
+      bestCount = count;
+    }
+  }
+
+  return bestValue;
+}
+
+function buildConsensusProfile(profiles: HandwritingProfile[]): HandwritingProfile {
+  const base = profiles[0];
+
+  return {
+    slant: pickMostFrequent(profiles.map((p) => p.slant), base.slant),
+    stroke_weight: pickMostFrequent(profiles.map((p) => p.stroke_weight), base.stroke_weight),
+    letter_spacing: pickMostFrequent(profiles.map((p) => p.letter_spacing), base.letter_spacing),
+    word_spacing: pickMostFrequent(profiles.map((p) => p.word_spacing), base.word_spacing),
+    baseline: pickMostFrequent(profiles.map((p) => p.baseline), base.baseline),
+    height_ratio: pickMostFrequent(profiles.map((p) => p.height_ratio), base.height_ratio),
+    writing_style: pickMostFrequent(profiles.map((p) => p.writing_style), base.writing_style),
+    letter_formations: {
+      a: pickMostFrequent(profiles.map((p) => p.letter_formations.a), base.letter_formations.a),
+      e: pickMostFrequent(profiles.map((p) => p.letter_formations.e), base.letter_formations.e),
+      g: pickMostFrequent(profiles.map((p) => p.letter_formations.g), base.letter_formations.g),
+      r: pickMostFrequent(profiles.map((p) => p.letter_formations.r), base.letter_formations.r),
+      t: pickMostFrequent(profiles.map((p) => p.letter_formations.t), base.letter_formations.t),
+      s: pickMostFrequent(profiles.map((p) => p.letter_formations.s), base.letter_formations.s),
+    },
+    confidence_level: Math.max(0, Math.min(1, profiles.reduce((sum, p) => sum + (p.confidence_level || 0.8), 0) / profiles.length)),
+  };
+}
+
+async function extractPageFeaturesOnce(
   pageNumber: number,
   imageBase64: string,
   apiKey: string
 ): Promise<{ profile: HandwritingProfile | null; is_handwritten: boolean }> {
-  console.log(`Extracting features for page ${pageNumber}...`);
-
   const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -324,6 +367,9 @@ async function extractPageFeatures(
     },
     body: JSON.stringify({
       model: 'google/gemini-2.5-flash',
+      temperature: 0,
+      top_p: 0.1,
+      response_format: { type: 'json_object' },
       messages: [
         {
           role: 'user',
@@ -352,7 +398,6 @@ async function extractPageFeatures(
   let cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    console.error(`Page ${pageNumber}: No JSON found in AI response`);
     return { profile: null, is_handwritten: true };
   }
 
@@ -360,15 +405,53 @@ async function extractPageFeatures(
     const parsed = JSON.parse(jsonMatch[0]);
     const is_handwritten = parsed.is_handwritten !== false;
     const profile = normalizeProfile(parsed);
-    console.log(`Page ${pageNumber}: extraction ${profile ? 'success' : 'failed normalization'}, handwritten: ${is_handwritten}`);
-    if (profile) {
-      console.log(`Page ${pageNumber} profile:`, JSON.stringify(profile));
-    }
     return { profile, is_handwritten };
-  } catch (err) {
-    console.error(`Page ${pageNumber}: JSON parse error:`, err);
+  } catch {
     return { profile: null, is_handwritten: true };
   }
+}
+
+async function extractPageFeatures(
+  pageNumber: number,
+  imageBase64: string,
+  apiKey: string
+): Promise<{ profile: HandwritingProfile | null; is_handwritten: boolean }> {
+  console.log(`Extracting features for page ${pageNumber} with ${EXTRACTION_ATTEMPTS} attempts...`);
+
+  const successfulProfiles: HandwritingProfile[] = [];
+  let nonHandwrittenVotes = 0;
+
+  for (let attempt = 1; attempt <= EXTRACTION_ATTEMPTS; attempt++) {
+    const result = await extractPageFeaturesOnce(pageNumber, imageBase64, apiKey);
+
+    if (!result.is_handwritten) {
+      nonHandwrittenVotes++;
+    }
+
+    if (result.profile) {
+      successfulProfiles.push(result.profile);
+    }
+
+    console.log(`Page ${pageNumber}: extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} -> ${result.profile ? 'ok' : 'failed'}, handwritten=${result.is_handwritten}`);
+  }
+
+  if (nonHandwrittenVotes >= 2) {
+    return { profile: null, is_handwritten: false };
+  }
+
+  if (successfulProfiles.length === 0) {
+    console.error(`Page ${pageNumber}: all extraction attempts failed`);
+    return { profile: null, is_handwritten: true };
+  }
+
+  const profile = successfulProfiles.length === 1
+    ? successfulProfiles[0]
+    : buildConsensusProfile(successfulProfiles);
+
+  console.log(`Page ${pageNumber}: extraction consensus from ${successfulProfiles.length}/${EXTRACTION_ATTEMPTS} attempts`);
+  console.log(`Page ${pageNumber} profile:`, JSON.stringify(profile));
+
+  return { profile, is_handwritten: true };
 }
 
 // ==================== WEIGHTED COMPARISON (Stage 2) ====================
@@ -387,10 +470,16 @@ function compareProfilesWeighted(
   sub: HandwritingProfile,
   weightMap: Map<string, number>
 ): WeightedComparisonResult {
-  let rawScore = 0;
+  let matchedWeightedScore = 0;
+  let maxWeightedScore = 0;
   const matches: string[] = [];
   const differences: string[] = [];
   let rareMatchCount = 0;
+
+  const getWeight = (category: string, value: string): number => {
+    const key = `${category}:${value}`;
+    return weightMap.get(key) ?? 0.5;
+  };
 
   const compareFeature = (
     category: string,
@@ -398,48 +487,63 @@ function compareProfilesWeighted(
     subValue: string,
     maxPoints: number,
     featureName: string
-  ): number => {
+  ): void => {
+    const weight = getWeight(category, refValue);
+    const weightedMaxPoints = maxPoints * weight;
+    maxWeightedScore += weightedMaxPoints;
+
     if (refValue !== subValue) {
       differences.push(`${featureName} differs (${refValue} vs ${subValue})`);
-      return 0;
+      return;
     }
-    const key = `${category}:${refValue}`;
-    const weight = weightMap.get(key) || 0.5;
-    const points = maxPoints * weight;
+
+    matchedWeightedScore += weightedMaxPoints;
 
     if (weight >= 0.7) {
       rareMatchCount++;
-      matches.push(`${featureName}: ${refValue} [RARE, +${points.toFixed(1)}pts]`);
+      matches.push(`${featureName}: ${refValue} [RARE, +${weightedMaxPoints.toFixed(1)}pts]`);
     } else {
-      matches.push(`${featureName}: ${refValue} [+${points.toFixed(1)}pts]`);
+      matches.push(`${featureName}: ${refValue} [+${weightedMaxPoints.toFixed(1)}pts]`);
     }
-    return points;
   };
 
-  rawScore += compareFeature('slant', ref.slant, sub.slant, 15, 'Slant');
-  rawScore += compareFeature('stroke_weight', ref.stroke_weight, sub.stroke_weight, 10, 'Stroke weight');
-  rawScore += compareFeature('letter_spacing', ref.letter_spacing, sub.letter_spacing, 15, 'Letter spacing');
-  rawScore += compareFeature('word_spacing', ref.word_spacing, sub.word_spacing, 10, 'Word spacing');
-  rawScore += compareFeature('baseline', ref.baseline, sub.baseline, 10, 'Baseline');
-  rawScore += compareFeature('height_ratio', ref.height_ratio, sub.height_ratio, 10, 'Height ratio');
-  rawScore += compareFeature('writing_style', ref.writing_style, sub.writing_style, 10, 'Writing style');
+  compareFeature('slant', ref.slant, sub.slant, 15, 'Slant');
+  compareFeature('stroke_weight', ref.stroke_weight, sub.stroke_weight, 10, 'Stroke weight');
+  compareFeature('letter_spacing', ref.letter_spacing, sub.letter_spacing, 15, 'Letter spacing');
+  compareFeature('word_spacing', ref.word_spacing, sub.word_spacing, 10, 'Word spacing');
+  compareFeature('baseline', ref.baseline, sub.baseline, 10, 'Baseline');
+  compareFeature('height_ratio', ref.height_ratio, sub.height_ratio, 10, 'Height ratio');
+  compareFeature('writing_style', ref.writing_style, sub.writing_style, 10, 'Writing style');
 
-  // Letter formations (30 points total, 5 per letter)
+  // Letter formations (30 points total, 5 per letter), weighted by rarity
   const letters = ['a', 'e', 'g', 'r', 't', 's'] as const;
   for (const letter of letters) {
     const refShape = ref.letter_formations[letter];
     const subShape = sub.letter_formations[letter];
-    if (refShape && subShape) {
-      rawScore += compareFeature('letter_shape', refShape, subShape, 5, `Letter ${letter}`);
+
+    if (!refShape) continue;
+
+    if (!subShape) {
+      const missingWeight = getWeight('letter_shape', refShape);
+      maxWeightedScore += 5 * missingWeight;
+      differences.push(`Letter ${letter} missing in submission (${refShape})`);
+      continue;
     }
+
+    compareFeature('letter_shape', refShape, subShape, 5, `Letter ${letter}`);
   }
+
+  // Normalize weighted score to 0-100 so thresholds remain meaningful
+  const normalizedScore = maxWeightedScore > 0
+    ? (matchedWeightedScore / maxWeightedScore) * 100
+    : 0;
 
   // Confidence adjustment
   const refConfidence = ref.confidence_level || 0.8;
   const subConfidence = sub.confidence_level || 0.8;
   const avgConfidence = (refConfidence + subConfidence) / 2;
-  const confidenceAdjusted = rawScore * avgConfidence;
-  const finalScore = Math.round(confidenceAdjusted);
+  const confidenceAdjusted = normalizedScore * avgConfidence;
+  const finalScore = Math.max(0, Math.min(100, Math.round(confidenceAdjusted)));
 
   // Dynamic threshold
   let threshold = 70;
@@ -457,10 +561,10 @@ function compareProfilesWeighted(
   const observations = [
     ...topMatches,
     ...topDifferences,
-    `[Raw: ${rawScore.toFixed(1)}, Conf: ${(avgConfidence * 100).toFixed(0)}%, Final: ${finalScore}, Thresh: ${threshold}, Rare: ${rareMatchCount}]`
+    `[Weighted: ${matchedWeightedScore.toFixed(1)}/${maxWeightedScore.toFixed(1)}, Norm: ${normalizedScore.toFixed(1)}, Conf: ${(avgConfidence * 100).toFixed(0)}%, Final: ${finalScore}, Thresh: ${threshold}, Rare: ${rareMatchCount}]`
   ];
 
-  console.log(`Weighted comparison: raw=${rawScore.toFixed(1)}, final=${finalScore}, threshold=${threshold}, rare=${rareMatchCount}, evidence=${evidenceStrength}`);
+  console.log(`Weighted comparison: matched=${matchedWeightedScore.toFixed(1)}, max=${maxWeightedScore.toFixed(1)}, norm=${normalizedScore.toFixed(1)}, final=${finalScore}, threshold=${threshold}, rare=${rareMatchCount}, evidence=${evidenceStrength}`);
 
   return {
     similarity_score: finalScore,
