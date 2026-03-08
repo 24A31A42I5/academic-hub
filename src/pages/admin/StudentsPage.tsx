@@ -288,6 +288,19 @@ const StudentsPage = () => {
 
       if (detailsError) throw detailsError;
 
+      // Update password if provided
+      if (editForm.password.trim()) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const response = await supabase.functions.invoke('update-user-password', {
+          body: { user_id: editStudent.user_id, password: editForm.password.trim() },
+        });
+        if (response.error) {
+          toast.error('Profile updated but password change failed');
+          setSaving(false);
+          return;
+        }
+      }
+
       toast.success('Student updated successfully');
       setEditStudent(null);
       fetchStudents();
