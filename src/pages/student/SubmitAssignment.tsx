@@ -299,7 +299,7 @@ const SubmitAssignment = () => {
         // Fix 10: Chain .select('id') to detect RLS rejection
         const { data: updatedRows, error } = await supabase
           .from('submissions')
-          .update(baseSubmission)
+          .update(studentSubmissionData)
           .eq('id', existingSubmission.id)
           .select('id');
 
