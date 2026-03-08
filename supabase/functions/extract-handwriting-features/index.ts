@@ -42,6 +42,52 @@ function validateProfile(profile: any): boolean {
   return true;
 }
 
+const EXTRACTION_ATTEMPTS = 3;
+
+function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
+  if (values.length === 0) return fallback;
+
+  const counts = new Map<T, number>();
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+
+  let best = fallback;
+  let bestCount = -1;
+  for (const [value, count] of counts.entries()) {
+    if (count > bestCount) {
+      best = value;
+      bestCount = count;
+    }
+  }
+
+  return best;
+}
+
+function buildConsensusProfile(profiles: any[]): any {
+  const base = profiles[0];
+
+  return {
+    slant: pickMostFrequent(profiles.map((p) => p.slant), base.slant),
+    stroke_weight: pickMostFrequent(profiles.map((p) => p.stroke_weight), base.stroke_weight),
+    letter_spacing: pickMostFrequent(profiles.map((p) => p.letter_spacing), base.letter_spacing),
+    word_spacing: pickMostFrequent(profiles.map((p) => p.word_spacing), base.word_spacing),
+    baseline: pickMostFrequent(profiles.map((p) => p.baseline), base.baseline),
+    height_ratio: pickMostFrequent(profiles.map((p) => p.height_ratio), base.height_ratio),
+    writing_style: pickMostFrequent(profiles.map((p) => p.writing_style), base.writing_style),
+    letter_formations: {
+      a: pickMostFrequent(profiles.map((p) => p.letter_formations?.a ?? 'simple'), base.letter_formations?.a ?? 'simple'),
+      e: pickMostFrequent(profiles.map((p) => p.letter_formations?.e ?? 'simple'), base.letter_formations?.e ?? 'simple'),
+      g: pickMostFrequent(profiles.map((p) => p.letter_formations?.g ?? 'simple'), base.letter_formations?.g ?? 'simple'),
+      r: pickMostFrequent(profiles.map((p) => p.letter_formations?.r ?? 'simple'), base.letter_formations?.r ?? 'simple'),
+      t: pickMostFrequent(profiles.map((p) => p.letter_formations?.t ?? 'simple'), base.letter_formations?.t ?? 'simple'),
+      s: pickMostFrequent(profiles.map((p) => p.letter_formations?.s ?? 'simple'), base.letter_formations?.s ?? 'simple'),
+    },
+    is_handwritten: true,
+    confidence_level: Math.max(0, Math.min(1, profiles.reduce((sum, p) => sum + (p.confidence_level ?? 0.8), 0) / profiles.length)),
+  };
+}
+
 // ==================== EXTRACTION PROMPT ====================
 
 const EXTRACTION_PROMPT = `You are a forensic handwriting analyst extracting biometric features from a handwriting sample. You MUST return a structured JSON object with EXACT enum values for each feature.
