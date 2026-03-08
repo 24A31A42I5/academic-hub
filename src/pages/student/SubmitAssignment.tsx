@@ -276,21 +276,20 @@ const SubmitAssignment = () => {
       // Check if deadline passed
       const isLate = isPast(new Date(assignment.deadline));
 
-      // Base submission data
-      const baseSubmission = {
+      // Base submission data — only include fields students are allowed to modify
+      const studentSubmissionData = {
         file_url: uploadedUrls[0], // First image for backward compatibility
         file_urls: uploadedUrls,
-        file_type: 'image/jpeg', // All submissions are now images
+        file_type: 'image/jpeg',
         submitted_at: new Date().toISOString(),
         is_late: isLate,
+      };
+
+      // Full submission data for new inserts (includes AI fields with defaults)
+      const newSubmissionData = {
+        ...studentSubmissionData,
         status: 'pending',
-        ai_similarity_score: null,
-        ai_confidence_score: null,
         ai_risk_level: 'pending',
-        ai_flagged_sections: null,
-        ai_analysis_details: null,
-        page_verification_results: null,
-        verified_at: null,
       };
 
       let submissionId: string;
@@ -300,7 +299,7 @@ const SubmitAssignment = () => {
         // Fix 10: Chain .select('id') to detect RLS rejection
         const { data: updatedRows, error } = await supabase
           .from('submissions')
-          .update(baseSubmission)
+          .update(studentSubmissionData)
           .eq('id', existingSubmission.id)
           .select('id');
 
@@ -313,7 +312,7 @@ const SubmitAssignment = () => {
         const { data: newSubmission, error } = await supabase
           .from('submissions')
           .insert({
-            ...baseSubmission,
+            ...newSubmissionData,
             assignment_id: assignment.id,
             student_profile_id: profile.id,
           })
