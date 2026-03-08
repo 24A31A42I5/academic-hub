@@ -191,19 +191,7 @@ const StudentHandwriting = () => {
         .from('handwriting-samples')
         .getPublicUrl(fileName);
 
-      // Update student_details with handwriting URL and hash
-      const { error: updateError } = await supabase
-        .from('student_details')
-        .update({
-          handwriting_url: publicUrl,
-          handwriting_submitted_at: new Date().toISOString(),
-          handwriting_image_hash: imageHash,
-        })
-        .eq('id', studentDetails.id);
-
-      if (updateError) throw updateError;
-
-      // Now extract features using the edge function
+      // Save URL/hash and extract features via edge function (uses service role)
       setUploading(false);
       setExtractingFeatures(true);
 
@@ -212,6 +200,9 @@ const StudentHandwriting = () => {
           body: {
             image_url: publicUrl,
             student_details_id: studentDetails.id,
+            handwriting_url: publicUrl,
+            handwriting_image_hash: imageHash,
+            mode: 'save_and_extract',
           },
         });
 
