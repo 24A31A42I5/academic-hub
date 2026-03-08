@@ -268,29 +268,15 @@ const StudentHandwriting = () => {
 
     setRetraining(true);
     try {
-      // Step 1: Null out old features first
-      const { error: clearError } = await supabase
-        .from('student_details')
-        .update({
-          handwriting_feature_embedding: null,
-          handwriting_features_extracted_at: null,
-        })
-        .eq('id', studentDetails.id)
-        .eq('profile_id', profile!.id);
-
-      if (clearError) {
-        toast.error('Failed to clear old features');
-        return;
-      }
-
-      // Step 2: Build cache-busted URL
+      // Build cache-busted URL
       const freshUrl = `${studentDetails.handwriting_url.split('?')[0]}?t=${Date.now()}`;
 
-      // Step 3: Re-extract features
+      // Call edge function which uses service role to clear and re-extract
       const { data, error } = await supabase.functions.invoke('extract-handwriting-features', {
         body: {
           image_url: freshUrl,
           student_details_id: studentDetails.id,
+          retrain: true,
         },
       });
 
