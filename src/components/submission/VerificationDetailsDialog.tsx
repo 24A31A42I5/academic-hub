@@ -58,7 +58,7 @@ export const VerificationDetailsDialog = ({
   const riskLevel = submission.ai_risk_level;
   const pageResults = details?.page_results || [];
 
-  const isWeightedVersion = details?.algorithm_version?.includes('weighted') || details?.algorithm_version?.includes('6.0');
+  const isWeightedVersion = details?.algorithm_version?.includes('weighted') || details?.algorithm_version?.includes('6.0') || details?.algorithm_version?.includes('7.0');
 
   const getScoreColor = (score: number | null) => {
     if (score === null) return 'text-muted-foreground';
