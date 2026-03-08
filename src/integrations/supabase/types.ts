@@ -128,6 +128,36 @@ export type Database = {
           },
         ]
       }
+      feature_statistics: {
+        Row: {
+          discriminative_weight: number
+          feature_category: string
+          feature_value: string
+          id: number
+          population_frequency: number
+          sample_count: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          discriminative_weight: number
+          feature_category: string
+          feature_value: string
+          id?: number
+          population_frequency: number
+          sample_count?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          discriminative_weight?: number
+          feature_category?: string
+          feature_value?: string
+          id?: number
+          population_frequency?: number
+          sample_count?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
