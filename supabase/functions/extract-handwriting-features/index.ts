@@ -11,8 +11,12 @@ const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-// ==================== STRICT ENUM DEFINITIONS ====================
+// ==================== CONFIG ====================
+const EXTRACTION_ATTEMPTS = 3;
+const AI_REQUEST_TIMEOUT_MS = 90_000;
+const AI_RETRY_DELAYS = [2000, 5000, 10000];
 
+// ==================== ENUMS ====================
 const VALID_ENUMS: Record<string, string[]> = {
   slant: ['left_lean', 'right_lean', 'upright'],
   stroke_weight: ['thin', 'medium', 'thick'],
@@ -56,8 +60,6 @@ function validateProfile(profile: any): boolean {
   return true;
 }
 
-const EXTRACTION_ATTEMPTS = 3;
-
 function pickMostFrequent<T extends string>(values: (T | undefined | null)[], fallback: T): T {
   const filtered = values.filter((v): v is T => v != null);
   if (filtered.length === 0) return fallback;
@@ -71,14 +73,8 @@ function pickMostFrequent<T extends string>(values: (T | undefined | null)[], fa
 function buildConsensusProfile(profiles: any[]): any {
   const base = profiles[0];
   const result: any = {};
-
-  for (const f of CORE_FIELDS) {
-    result[f] = pickMostFrequent(profiles.map(p => p[f]), base[f]);
-  }
-  for (const f of EXTENDED_FIELDS) {
-    result[f] = pickMostFrequent(profiles.map(p => p[f]), base[f] ?? null);
-  }
-
+  for (const f of CORE_FIELDS) result[f] = pickMostFrequent(profiles.map(p => p[f]), base[f]);
+  for (const f of EXTENDED_FIELDS) result[f] = pickMostFrequent(profiles.map(p => p[f]), base[f] ?? null);
   result.letter_formations = {};
   for (const l of LETTERS) {
     result.letter_formations[l] = pickMostFrequent(
@@ -86,16 +82,14 @@ function buildConsensusProfile(profiles: any[]): any {
       base.letter_formations?.[l] ?? 'simple'
     );
   }
-
   result.is_handwritten = true;
   result.confidence_level = Math.max(0, Math.min(1,
     profiles.reduce((sum: number, p: any) => sum + (p.confidence_level ?? 0.8), 0) / profiles.length
   ));
-
   return result;
 }
 
-// ==================== v7.0 ENHANCED EXTRACTION PROMPT ====================
+// ==================== EXTRACTION PROMPT (v7.0 Enhanced) ====================
 
 const EXTRACTION_PROMPT = `You are an expert forensic document examiner performing questioned document analysis. Extract ALL biometric handwriting features from this sample with extreme precision. Return ONLY a JSON object with EXACT enum values.
 
@@ -206,6 +200,68 @@ RETURN THIS EXACT JSON STRUCTURE:
   "confidence_level": 0.9
 }`;
 
+// ==================== AI CALL WITH RETRY + TIMEOUT ====================
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callAIWithRetry(imageBase64: string): Promise<Response> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < AI_RETRY_DELAYS.length; attempt++) {
+    try {
+      const response = await fetchWithTimeout(
+        'https://ai.gateway.lovable.dev/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-pro',
+            temperature: 0, top_p: 0.1,
+            response_format: { type: 'json_object' },
+            messages: [{ role: 'user', content: [
+              { type: 'text', text: EXTRACTION_PROMPT },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
+            ]}],
+          }),
+        },
+        AI_REQUEST_TIMEOUT_MS
+      );
+
+      if (response.ok) return response;
+      
+      if (response.status === 429) {
+        console.warn(`Rate limited on attempt ${attempt + 1}, backing off ${AI_RETRY_DELAYS[attempt]}ms...`);
+        if (attempt < AI_RETRY_DELAYS.length - 1) {
+          await new Promise(r => setTimeout(r, AI_RETRY_DELAYS[attempt]));
+          continue;
+        }
+        throw new Error('Rate limit exceeded after retries');
+      }
+      if (response.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
+      
+      lastError = new Error(`AI Gateway ${response.status}`);
+      if (attempt < AI_RETRY_DELAYS.length - 1) {
+        await new Promise(r => setTimeout(r, AI_RETRY_DELAYS[attempt]));
+      }
+    } catch (e: any) {
+      if (e.message?.includes('credits')) throw e;
+      lastError = e.name === 'AbortError' ? new Error('AI request timed out') : e;
+      if (attempt < AI_RETRY_DELAYS.length - 1) {
+        await new Promise(r => setTimeout(r, AI_RETRY_DELAYS[attempt]));
+      }
+    }
+  }
+  throw lastError || new Error('AI call failed');
+}
+
 // ==================== HELPERS ====================
 
 async function fetchFileAsBase64(url: string): Promise<string> {
@@ -224,7 +280,7 @@ serve(async (req) => {
   try {
     const { image_url, student_details_id } = await req.json();
 
-    console.log('=== HANDWRITING FEATURE EXTRACTION v7.0 START ===');
+    console.log('=== HANDWRITING FEATURE EXTRACTION v7.0-enhanced START ===');
     console.log('Student details ID:', student_details_id);
 
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY is not configured');
@@ -238,37 +294,8 @@ serve(async (req) => {
 
     for (let attempt = 1; attempt <= EXTRACTION_ATTEMPTS; attempt++) {
       try {
-        const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-2.5-pro',
-            temperature: 0,
-            top_p: 0.1,
-            response_format: { type: 'json_object' },
-            messages: [{
-              role: 'user',
-              content: [
-                { type: 'text', text: EXTRACTION_PROMPT },
-                { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
-              ]
-            }],
-          }),
-        });
-
-        if (!aiResponse.ok) {
-          const status = aiResponse.status;
-          const errorText = await aiResponse.text();
-          console.error(`AI Gateway error (attempt ${attempt}):`, status, errorText);
-          if (status === 429) throw new Error('Rate limit exceeded. Please try again later.');
-          if (status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
-          throw new Error(`AI analysis failed: ${status}`);
-        }
-
-        const aiData = await aiResponse.json();
+        const response = await callAIWithRetry(imageBase64);
+        const aiData = await response.json();
         const responseText = aiData.choices?.[0]?.message?.content || '';
         const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
         const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
@@ -287,14 +314,14 @@ serve(async (req) => {
 
         extractedProfiles.push(parsed);
         console.log(`Attempt ${attempt}/${EXTRACTION_ATTEMPTS} succeeded`);
-      } catch (attemptError) {
-        console.error(`Attempt ${attempt} failed:`, attemptError);
-        if ((attemptError as Error).message?.includes('Rate limit') || (attemptError as Error).message?.includes('credits')) throw attemptError;
+      } catch (attemptError: any) {
+        console.error(`Attempt ${attempt} failed:`, attemptError.message);
+        if (attemptError.message?.includes('Rate limit') || attemptError.message?.includes('credits')) throw attemptError;
       }
     }
 
     if (nonHandwrittenVotes >= 2) throw new Error('Uploaded sample appears typed/printed instead of handwritten');
-    if (extractedProfiles.length === 0) throw new Error('Failed to create handwriting profile from image');
+    if (extractedProfiles.length === 0) throw new Error('Failed to create handwriting profile from image. Please try a clearer photo.');
 
     const handwritingProfile = extractedProfiles.length === 1
       ? extractedProfiles[0]
@@ -306,7 +333,6 @@ serve(async (req) => {
     handwritingProfile.feature_count = CORE_FIELDS.length + EXTENDED_FIELDS.length + LETTERS.length;
 
     console.log(`Consensus from ${extractedProfiles.length}/${EXTRACTION_ATTEMPTS} attempts`);
-    console.log('Profile:', JSON.stringify(handwritingProfile, null, 2));
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { error: updateError } = await supabase
@@ -319,7 +345,7 @@ serve(async (req) => {
 
     if (updateError) throw new Error('Failed to save handwriting profile');
 
-    console.log('=== EXTRACTION v7.0 COMPLETE ===');
+    console.log('=== EXTRACTION v7.0-enhanced COMPLETE ===');
 
     return new Response(JSON.stringify({
       success: true,
@@ -329,10 +355,10 @@ serve(async (req) => {
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
-  } catch (error) {
-    console.error('Error:', error);
+  } catch (error: any) {
+    console.error('Error:', error.message);
     return new Response(JSON.stringify({
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: error.message || 'Unknown error',
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
