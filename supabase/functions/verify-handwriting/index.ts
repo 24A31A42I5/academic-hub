@@ -90,8 +90,8 @@ const HEIGHT_MAP: Record<string, HandwritingProfile["height_ratio"]> = {
   "short": "short", "small": "short", "compact": "short", "low": "short",
   "moderate": "moderate", "medium": "moderate", "average": "moderate", "normal": "moderate",
   "tall": "tall", "large": "tall", "extended": "tall",
-  "approximately twice": "tall", "twice the height": "tall", "2x": "tall",
-  "1.5": "moderate", "proportional": "moderate",
+  "approximately twice": "tall", "twice the height": "tall", "2x": "tall", "2:1": "tall",
+  "1.5": "moderate", "proportional": "moderate", "1.5:1": "moderate",
 };
 
 const STYLE_MAP: Record<string, HandwritingProfile["writing_style"]> = {
@@ -126,11 +126,22 @@ function normalizeLetterShape(description: string | undefined | null): LetterSha
 function mapEnum<T>(value: string | undefined | null, map: Record<string, T>): T | null {
   if (!value) return null;
   const key = String(value).toLowerCase().trim();
+  // Exact match
   if (map[key]) return map[key];
+  // Sort by key length (longest first) for specificity
   const sortedEntries = Object.entries(map).sort((a, b) => b[0].length - a[0].length);
+  // First try word-boundary regex match
   for (const [k, v] of sortedEntries) {
-    const regex = new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (regex.test(key)) return v;
+    try {
+      const regex = new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(key)) return v;
+    } catch {
+      // Fallback for regex issues
+    }
+  }
+  // Then try simple includes (catches patterns like "2:1" in longer text)
+  for (const [k, v] of sortedEntries) {
+    if (key.includes(k)) return v;
   }
   return null;
 }

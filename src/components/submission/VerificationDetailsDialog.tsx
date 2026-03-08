@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
-import { CheckCircle, XCircle, AlertTriangle, Brain, FileText, Info, Image } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Brain, FileText, Info, Image, Sparkles, Shield, TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface PageResult {
@@ -30,6 +30,9 @@ interface VerificationDetails {
   has_typed_content?: boolean;
   has_different_writer?: boolean;
   overall_similarity_score?: number;
+  // v6.0 weighted fields
+  rare_feature_matches?: number;
+  evidence_strength?: string;
 }
 
 interface VerificationDetailsDialogProps {
@@ -54,6 +57,8 @@ export const VerificationDetailsDialog = ({
   const riskLevel = submission.ai_risk_level;
   const pageResults = details?.page_results || [];
 
+  const isWeightedVersion = details?.algorithm_version?.includes('weighted') || details?.algorithm_version?.includes('6.0');
+
   const getScoreColor = (score: number | null) => {
     if (score === null) return 'text-muted-foreground';
     if (score >= 75) return 'text-green-600';
@@ -73,6 +78,24 @@ export const VerificationDetailsDialog = ({
     if (result.same_writer) return 'bg-green-500/10 text-green-600';
     if (result.similarity >= 50) return 'bg-yellow-500/10 text-yellow-600';
     return 'bg-red-500/10 text-red-600';
+  };
+
+  const getEvidenceColor = (strength: string | undefined) => {
+    switch (strength) {
+      case 'very_strong': return 'bg-green-500/10 text-green-700 border-green-500/20';
+      case 'strong': return 'bg-blue-500/10 text-blue-700 border-blue-500/20';
+      case 'moderate': return 'bg-yellow-500/10 text-yellow-700 border-yellow-500/20';
+      default: return 'bg-muted text-muted-foreground border-border';
+    }
+  };
+
+  const getEvidenceLabel = (strength: string | undefined) => {
+    switch (strength) {
+      case 'very_strong': return 'Very Strong Evidence';
+      case 'strong': return 'Strong Evidence';
+      case 'moderate': return 'Moderate Evidence';
+      default: return 'Weak Evidence';
+    }
   };
 
   const getRiskBadge = () => {
@@ -193,6 +216,49 @@ export const VerificationDetailsDialog = ({
             {getRiskBadge()}
           </div>
 
+          {/* v6.0 Weighted Evidence Summary */}
+          {isWeightedVersion && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Sparkles className="w-4 h-4 text-primary" />
+                Evidence Analysis
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Evidence Strength */}
+                <div className={cn("p-3 rounded-lg border", getEvidenceColor(details?.evidence_strength))}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <Shield className="w-3.5 h-3.5" />
+                    <span className="text-xs font-medium">Evidence Strength</span>
+                  </div>
+                  <p className="text-sm font-semibold">
+                    {getEvidenceLabel(details?.evidence_strength)}
+                  </p>
+                </div>
+
+                {/* Rare Feature Matches */}
+                <div className={cn(
+                  "p-3 rounded-lg border",
+                  (details?.rare_feature_matches ?? 0) >= 3 
+                    ? 'bg-green-500/10 text-green-700 border-green-500/20'
+                    : (details?.rare_feature_matches ?? 0) >= 1
+                      ? 'bg-blue-500/10 text-blue-700 border-blue-500/20'
+                      : 'bg-muted text-muted-foreground border-border'
+                )}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span className="text-xs font-medium">Rare Matches</span>
+                  </div>
+                  <p className="text-sm font-semibold">
+                    {details?.rare_feature_matches ?? 0} rare feature{(details?.rare_feature_matches ?? 0) !== 1 ? 's' : ''} matched
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Rare features (e.g., left-leaning slant, cursive style) provide stronger evidence of identity than common features.
+              </p>
+            </div>
+          )}
+
           {/* Page Count Info */}
           {details?.page_count && details.page_count > 1 && (
             <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -235,7 +301,7 @@ export const VerificationDetailsDialog = ({
                         ? 'Not handwritten' 
                         : result.same_writer 
                           ? 'Same writer' 
-                          : 'Different writer'}
+                          : 'Needs review'}
                     </div>
                   </div>
                 ))}
