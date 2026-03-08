@@ -255,7 +255,8 @@ export const VerificationDetailsDialog = ({
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Rare features (e.g., left-leaning slant, cursive style) provide stronger evidence of identity than common features.
+                Rare features (e.g., left-leaning slant, cursive style, circle i-dots) provide stronger evidence of identity than common features.
+                {details?.aggregation_method === 'trimmed_median_with_consistency_bonus' && ' Scores use trimmed median aggregation with cross-page consistency bonus.'}
               </p>
             </div>
           )}
