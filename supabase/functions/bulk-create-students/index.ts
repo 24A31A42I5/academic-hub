@@ -179,12 +179,8 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // Use provided password directly (admin is responsible for password strength)
-        const password = student.password;
-        if (!password) {
-          results.failed.push({ email: student.email, error: "Password is required" });
-          continue;
-        }
+        // Use provided password or default
+        const password = student.password || "Student@123";
 
         // Create user in auth
         const { data: authData, error: createError } = await supabaseAdmin.auth.admin.createUser({
