@@ -312,7 +312,7 @@ const SubmitAssignment = () => {
         const { data: newSubmission, error } = await supabase
           .from('submissions')
           .insert({
-            ...baseSubmission,
+            ...newSubmissionData,
             assignment_id: assignment.id,
             student_profile_id: profile.id,
           })
