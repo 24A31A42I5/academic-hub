@@ -387,10 +387,16 @@ function compareProfilesWeighted(
   sub: HandwritingProfile,
   weightMap: Map<string, number>
 ): WeightedComparisonResult {
-  let rawScore = 0;
+  let matchedWeightedScore = 0;
+  let maxWeightedScore = 0;
   const matches: string[] = [];
   const differences: string[] = [];
   let rareMatchCount = 0;
+
+  const getWeight = (category: string, value: string): number => {
+    const key = `${category}:${value}`;
+    return weightMap.get(key) ?? 0.5;
+  };
 
   const compareFeature = (
     category: string,
@@ -398,48 +404,63 @@ function compareProfilesWeighted(
     subValue: string,
     maxPoints: number,
     featureName: string
-  ): number => {
+  ): void => {
+    const weight = getWeight(category, refValue);
+    const weightedMaxPoints = maxPoints * weight;
+    maxWeightedScore += weightedMaxPoints;
+
     if (refValue !== subValue) {
       differences.push(`${featureName} differs (${refValue} vs ${subValue})`);
-      return 0;
+      return;
     }
-    const key = `${category}:${refValue}`;
-    const weight = weightMap.get(key) || 0.5;
-    const points = maxPoints * weight;
+
+    matchedWeightedScore += weightedMaxPoints;
 
     if (weight >= 0.7) {
       rareMatchCount++;
-      matches.push(`${featureName}: ${refValue} [RARE, +${points.toFixed(1)}pts]`);
+      matches.push(`${featureName}: ${refValue} [RARE, +${weightedMaxPoints.toFixed(1)}pts]`);
     } else {
-      matches.push(`${featureName}: ${refValue} [+${points.toFixed(1)}pts]`);
+      matches.push(`${featureName}: ${refValue} [+${weightedMaxPoints.toFixed(1)}pts]`);
     }
-    return points;
   };
 
-  rawScore += compareFeature('slant', ref.slant, sub.slant, 15, 'Slant');
-  rawScore += compareFeature('stroke_weight', ref.stroke_weight, sub.stroke_weight, 10, 'Stroke weight');
-  rawScore += compareFeature('letter_spacing', ref.letter_spacing, sub.letter_spacing, 15, 'Letter spacing');
-  rawScore += compareFeature('word_spacing', ref.word_spacing, sub.word_spacing, 10, 'Word spacing');
-  rawScore += compareFeature('baseline', ref.baseline, sub.baseline, 10, 'Baseline');
-  rawScore += compareFeature('height_ratio', ref.height_ratio, sub.height_ratio, 10, 'Height ratio');
-  rawScore += compareFeature('writing_style', ref.writing_style, sub.writing_style, 10, 'Writing style');
+  compareFeature('slant', ref.slant, sub.slant, 15, 'Slant');
+  compareFeature('stroke_weight', ref.stroke_weight, sub.stroke_weight, 10, 'Stroke weight');
+  compareFeature('letter_spacing', ref.letter_spacing, sub.letter_spacing, 15, 'Letter spacing');
+  compareFeature('word_spacing', ref.word_spacing, sub.word_spacing, 10, 'Word spacing');
+  compareFeature('baseline', ref.baseline, sub.baseline, 10, 'Baseline');
+  compareFeature('height_ratio', ref.height_ratio, sub.height_ratio, 10, 'Height ratio');
+  compareFeature('writing_style', ref.writing_style, sub.writing_style, 10, 'Writing style');
 
-  // Letter formations (30 points total, 5 per letter)
+  // Letter formations (30 points total, 5 per letter), weighted by rarity
   const letters = ['a', 'e', 'g', 'r', 't', 's'] as const;
   for (const letter of letters) {
     const refShape = ref.letter_formations[letter];
     const subShape = sub.letter_formations[letter];
-    if (refShape && subShape) {
-      rawScore += compareFeature('letter_shape', refShape, subShape, 5, `Letter ${letter}`);
+
+    if (!refShape) continue;
+
+    if (!subShape) {
+      const missingWeight = getWeight('letter_shape', refShape);
+      maxWeightedScore += 5 * missingWeight;
+      differences.push(`Letter ${letter} missing in submission (${refShape})`);
+      continue;
     }
+
+    compareFeature('letter_shape', refShape, subShape, 5, `Letter ${letter}`);
   }
+
+  // Normalize weighted score to 0-100 so thresholds remain meaningful
+  const normalizedScore = maxWeightedScore > 0
+    ? (matchedWeightedScore / maxWeightedScore) * 100
+    : 0;
 
   // Confidence adjustment
   const refConfidence = ref.confidence_level || 0.8;
   const subConfidence = sub.confidence_level || 0.8;
   const avgConfidence = (refConfidence + subConfidence) / 2;
-  const confidenceAdjusted = rawScore * avgConfidence;
-  const finalScore = Math.round(confidenceAdjusted);
+  const confidenceAdjusted = normalizedScore * avgConfidence;
+  const finalScore = Math.max(0, Math.min(100, Math.round(confidenceAdjusted)));
 
   // Dynamic threshold
   let threshold = 70;
@@ -457,10 +478,10 @@ function compareProfilesWeighted(
   const observations = [
     ...topMatches,
     ...topDifferences,
-    `[Raw: ${rawScore.toFixed(1)}, Conf: ${(avgConfidence * 100).toFixed(0)}%, Final: ${finalScore}, Thresh: ${threshold}, Rare: ${rareMatchCount}]`
+    `[Weighted: ${matchedWeightedScore.toFixed(1)}/${maxWeightedScore.toFixed(1)}, Norm: ${normalizedScore.toFixed(1)}, Conf: ${(avgConfidence * 100).toFixed(0)}%, Final: ${finalScore}, Thresh: ${threshold}, Rare: ${rareMatchCount}]`
   ];
 
-  console.log(`Weighted comparison: raw=${rawScore.toFixed(1)}, final=${finalScore}, threshold=${threshold}, rare=${rareMatchCount}, evidence=${evidenceStrength}`);
+  console.log(`Weighted comparison: matched=${matchedWeightedScore.toFixed(1)}, max=${maxWeightedScore.toFixed(1)}, norm=${normalizedScore.toFixed(1)}, final=${finalScore}, threshold=${threshold}, rare=${rareMatchCount}, evidence=${evidenceStrength}`);
 
   return {
     similarity_score: finalScore,
