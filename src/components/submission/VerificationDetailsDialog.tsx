@@ -30,9 +30,10 @@ interface VerificationDetails {
   has_typed_content?: boolean;
   has_different_writer?: boolean;
   overall_similarity_score?: number;
-  // v6.0 weighted fields
+  // v7.0 enhanced fields
   rare_feature_matches?: number;
   evidence_strength?: string;
+  aggregation_method?: string;
 }
 
 interface VerificationDetailsDialogProps {
