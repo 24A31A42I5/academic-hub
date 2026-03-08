@@ -15,6 +15,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const THRESHOLDS = { VERIFIED: 75, MANUAL_REVIEW: 50 };
 const MAX_BASE64_SIZE = 5 * 1024 * 1024;
 const EXTRACTION_ATTEMPTS = 3;
+const AI_REQUEST_TIMEOUT_MS = 60_000;
+const AI_RETRY_DELAYS = [1000, 3000, 6000]; // exponential backoff
 
 // ==================== ENUMS ====================
 const VALID_ENUMS: Record<string, string[]> = {
@@ -37,34 +39,21 @@ const CORE_FIELDS = ['slant', 'stroke_weight', 'letter_spacing', 'word_spacing',
 const EXTENDED_FIELDS = ['pen_pressure', 'line_quality', 'size_consistency', 't_cross_position', 'i_dot_style'] as const;
 const LETTERS = ['a', 'e', 'g', 'r', 't', 's'] as const;
 
-// ==================== PARTIAL MATCH SCORING ====================
-// Near-miss values get partial credit instead of zero
+// ==================== PARTIAL MATCH SIMILARITY MATRIX ====================
 const PARTIAL_SCORES: Record<string, number> = {
-  // Slant
   'slant:left_lean:upright': 0.30, 'slant:upright:right_lean': 0.30, 'slant:left_lean:right_lean': 0.0,
-  // Stroke weight
   'stroke_weight:thin:medium': 0.40, 'stroke_weight:medium:thick': 0.40, 'stroke_weight:thin:thick': 0.0,
-  // Spacing (letter & word)
   'letter_spacing:tight:normal': 0.40, 'letter_spacing:normal:wide': 0.40, 'letter_spacing:tight:wide': 0.0,
   'word_spacing:tight:normal': 0.40, 'word_spacing:normal:wide': 0.40, 'word_spacing:tight:wide': 0.0,
-  // Baseline
   'baseline:straight:wavy': 0.20, 'baseline:wavy:variable': 0.40, 'baseline:straight:variable': 0.10,
-  // Height ratio
   'height_ratio:short:moderate': 0.40, 'height_ratio:moderate:tall': 0.40, 'height_ratio:short:tall': 0.0,
-  // Writing style
   'writing_style:cursive:mixed': 0.40, 'writing_style:print:mixed': 0.40, 'writing_style:cursive:print': 0.0,
-  // Pen pressure
   'pen_pressure:light:medium': 0.40, 'pen_pressure:medium:heavy': 0.40, 'pen_pressure:light:heavy': 0.0,
-  // Line quality
   'line_quality:smooth:variable': 0.30, 'line_quality:shaky:variable': 0.40, 'line_quality:smooth:shaky': 0.0,
-  // Size consistency
   'size_consistency:uniform:variable': 0.35, 'size_consistency:variable:decreasing': 0.35, 'size_consistency:uniform:decreasing': 0.0,
-  // T cross
   't_cross_position:low:middle': 0.35, 't_cross_position:middle:high': 0.35, 't_cross_position:low:high': 0.0,
-  // I dot
   'i_dot_style:round:circle': 0.50, 'i_dot_style:round:dash': 0.20, 'i_dot_style:dash:absent': 0.15,
   'i_dot_style:round:absent': 0.0, 'i_dot_style:circle:dash': 0.15, 'i_dot_style:circle:absent': 0.0,
-  // Letter shapes
   'letter_shape:rounded:looped': 0.50, 'letter_shape:rounded:closed': 0.40, 'letter_shape:rounded:open': 0.30,
   'letter_shape:angular:simple': 0.30, 'letter_shape:looped:closed': 0.30, 'letter_shape:open:simple': 0.30,
   'letter_shape:rounded:simple': 0.25, 'letter_shape:angular:looped': 0.10, 'letter_shape:angular:open': 0.20,
@@ -72,17 +61,13 @@ const PARTIAL_SCORES: Record<string, number> = {
   'letter_shape:looped:open': 0.25, 'letter_shape:closed:simple': 0.30,
 };
 
-// "mixed" is partially similar to everything
 function getPartialScore(category: string, a: string, b: string): number {
   if (a === b) return 1.0;
   if (a === 'mixed' || b === 'mixed') return 0.25;
-  const k1 = `${category}:${a}:${b}`;
-  const k2 = `${category}:${b}:${a}`;
-  return PARTIAL_SCORES[k1] ?? PARTIAL_SCORES[k2] ?? 0;
+  return PARTIAL_SCORES[`${category}:${a}:${b}`] ?? PARTIAL_SCORES[`${category}:${b}:${a}`] ?? 0;
 }
 
-// ==================== PROFILE TYPES & NORMALIZATION ====================
-
+// ==================== PROFILE TYPES ====================
 interface HandwritingProfile {
   slant: string; stroke_weight: string; letter_spacing: string; word_spacing: string;
   baseline: string; height_ratio: string; writing_style: string;
@@ -97,7 +82,7 @@ interface PageResult {
   is_handwritten: boolean; confidence: string;
 }
 
-// Legacy normalization maps
+// ==================== NORMALIZATION ====================
 const SLANT_MAP: Record<string, string> = {
   left: 'left_lean', left_lean: 'left_lean', 'left lean': 'left_lean', leftward: 'left_lean',
   right: 'right_lean', right_lean: 'right_lean', 'right lean': 'right_lean', rightward: 'right_lean',
@@ -239,6 +224,77 @@ FEATURES:
 JSON OUTPUT:
 {"slant":"upright","stroke_weight":"medium","letter_spacing":"normal","word_spacing":"normal","baseline":"straight","height_ratio":"moderate","writing_style":"mixed","pen_pressure":"medium","line_quality":"smooth","size_consistency":"uniform","t_cross_position":"middle","i_dot_style":"round","letter_formations":{"a":"rounded","e":"open","g":"looped","r":"angular","t":"simple","s":"closed"},"is_handwritten":true,"confidence_level":0.9}`;
 
+// ==================== AI CALL WITH RETRY + TIMEOUT ====================
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callAIWithRetry(imageBase64: string): Promise<Response> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < AI_RETRY_DELAYS.length; attempt++) {
+    try {
+      const response = await fetchWithTimeout(
+        'https://ai.gateway.lovable.dev/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            temperature: 0, top_p: 0.1,
+            response_format: { type: 'json_object' },
+            messages: [{ role: 'user', content: [
+              { type: 'text', text: EXTRACTION_PROMPT },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
+            ]}],
+          }),
+        },
+        AI_REQUEST_TIMEOUT_MS
+      );
+
+      if (response.ok) return response;
+      
+      if (response.status === 429) {
+        console.warn(`Rate limited on attempt ${attempt + 1}, backing off...`);
+        if (attempt < AI_RETRY_DELAYS.length - 1) {
+          await new Promise(r => setTimeout(r, AI_RETRY_DELAYS[attempt]));
+          continue;
+        }
+        throw new Error('Rate limit exceeded after retries');
+      }
+      if (response.status === 402) throw new Error('AI credits exhausted');
+      
+      const errText = await response.text().catch(() => 'unknown');
+      lastError = new Error(`AI Gateway ${response.status}: ${errText.substring(0, 200)}`);
+      
+      if (attempt < AI_RETRY_DELAYS.length - 1) {
+        await new Promise(r => setTimeout(r, AI_RETRY_DELAYS[attempt]));
+      }
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        lastError = new Error(`AI request timed out after ${AI_REQUEST_TIMEOUT_MS}ms`);
+      } else if (e.message?.includes('credits')) {
+        throw e;
+      } else {
+        lastError = e;
+      }
+      if (attempt < AI_RETRY_DELAYS.length - 1) {
+        await new Promise(r => setTimeout(r, AI_RETRY_DELAYS[attempt]));
+      }
+    }
+  }
+  
+  throw lastError || new Error('AI call failed after all retries');
+}
+
 // ==================== FEATURE EXTRACTION ====================
 
 function pickMostFrequent<T extends string>(values: (T | undefined | null)[], fallback: T): T {
@@ -263,27 +319,8 @@ function buildConsensusProfile(profiles: HandwritingProfile[]): HandwritingProfi
 }
 
 async function extractFeaturesOnce(imageBase64: string): Promise<{ profile: HandwritingProfile | null; is_handwritten: boolean }> {
-  const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash',
-      temperature: 0, top_p: 0.1,
-      response_format: { type: 'json_object' },
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: EXTRACTION_PROMPT },
-        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
-      ]}],
-    }),
-  });
-
-  if (!aiResponse.ok) {
-    if (aiResponse.status === 429) throw new Error('Rate limit exceeded');
-    if (aiResponse.status === 402) throw new Error('AI credits exhausted');
-    throw new Error(`AI Gateway error: ${aiResponse.status}`);
-  }
-
-  const aiData = await aiResponse.json();
+  const response = await callAIWithRetry(imageBase64);
+  const aiData = await response.json();
   const text = (aiData.choices?.[0]?.message?.content || '').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) return { profile: null, is_handwritten: true };
@@ -304,8 +341,10 @@ async function extractPageFeatures(pageNum: number, imageBase64: string): Promis
       if (!r.is_handwritten) notHandwritten++;
       if (r.profile) profiles.push(r.profile);
       console.log(`Page ${pageNum} attempt ${i}/${EXTRACTION_ATTEMPTS}: ${r.profile ? 'ok' : 'fail'}, hw=${r.is_handwritten}`);
-    } catch (e) {
-      console.error(`Page ${pageNum} attempt ${i} error:`, e);
+    } catch (e: any) {
+      console.error(`Page ${pageNum} attempt ${i} error:`, e.message);
+      // Don't retry rate limit / credits errors
+      if (e.message?.includes('credits') || e.message?.includes('Rate limit')) throw e;
     }
   }
 
@@ -335,7 +374,7 @@ function compareProfiles(
   const getWeight = (cat: string, val: string) => weightMap.get(`${cat}:${val}`) ?? 0.5;
 
   const compare = (cat: string, refV: string | undefined, subV: string | undefined, pts: number, name: string) => {
-    if (!refV || !subV) return; // Skip if feature not available
+    if (!refV || !subV) return;
     const weight = getWeight(cat, refV);
     const maxPts = pts * weight;
     maxScore += maxPts;
@@ -363,7 +402,7 @@ function compareProfiles(
   compare('height_ratio', ref.height_ratio, sub.height_ratio, 10, 'Height ratio');
   compare('writing_style', ref.writing_style, sub.writing_style, 10, 'Writing style');
 
-  // Extended features (25 max raw points) — only scored if both profiles have them
+  // Extended features (25 max raw points)
   compare('pen_pressure', ref.pen_pressure, sub.pen_pressure, 8, 'Pen pressure');
   compare('line_quality', ref.line_quality, sub.line_quality, 5, 'Line quality');
   compare('size_consistency', ref.size_consistency, sub.size_consistency, 5, 'Size consistency');
@@ -403,54 +442,58 @@ function compareProfiles(
 
 // ==================== ROBUST AGGREGATION ====================
 
-function aggregatePages(results: PageResult[]): { score: number; sameWriter: boolean } {
+function aggregatePages(results: PageResult[]): { score: number; sameWriter: boolean; method: string } {
   const handwrittenResults = results.filter(p => p.is_handwritten);
-  if (handwrittenResults.length === 0) return { score: 0, sameWriter: false };
+  if (handwrittenResults.length === 0) return { score: 0, sameWriter: false, method: 'no_handwritten_pages' };
 
   const scores = handwrittenResults.map(p => p.similarity).sort((a, b) => a - b);
-
   let aggregatedScore: number;
+  let method: string;
+
   if (scores.length <= 2) {
-    // For 1-2 pages: use minimum (conservative)
     aggregatedScore = scores[0];
+    method = 'minimum';
   } else if (scores.length <= 5) {
-    // For 3-5 pages: drop worst outlier, use median of rest
     const trimmed = scores.slice(1);
     aggregatedScore = trimmed[Math.floor(trimmed.length / 2)];
+    method = 'drop_worst_median';
   } else {
-    // For 6+ pages: drop bottom 15%, use median
     const dropCount = Math.max(1, Math.floor(scores.length * 0.15));
     const trimmed = scores.slice(dropCount);
     aggregatedScore = trimmed[Math.floor(trimmed.length / 2)];
+    method = 'trimmed_15pct_median';
   }
 
-  // Cross-page consistency bonus: if >75% pages agree on same_writer, boost by up to 5
+  // Cross-page consistency bonus
   const sameWriterCount = handwrittenResults.filter(p => p.same_writer).length;
   const sameWriterRatio = sameWriterCount / handwrittenResults.length;
   if (sameWriterRatio >= 0.75 && aggregatedScore >= 50) {
-    aggregatedScore = Math.min(100, aggregatedScore + Math.round(sameWriterRatio * 5));
+    const bonus = Math.round(sameWriterRatio * 5);
+    aggregatedScore = Math.min(100, aggregatedScore + bonus);
+    method += '_with_consistency_bonus';
   }
 
   const overallSameWriter = handwrittenResults.every(p => p.same_writer);
-  return { score: aggregatedScore, sameWriter: overallSameWriter };
+  return { score: aggregatedScore, sameWriter: overallSameWriter, method };
 }
 
 // ==================== UTILITIES ====================
 
 async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64: string; size: number }> {
+  let resolvedUrl = url;
   if (!url.startsWith('http')) {
     const { data, error } = await supabase.storage.from('uploads').createSignedUrl(url.split('?')[0], 300);
     if (error) throw new Error(`Failed to access file: ${error.message}`);
-    url = data.signedUrl;
+    resolvedUrl = data.signedUrl;
   } else {
     const m = url.match(/\/storage\/v1\/object\/public\/uploads\/(.+?)(\?.*)?$/);
     if (m) {
       const { data, error } = await supabase.storage.from('uploads').createSignedUrl(m[1], 300);
       if (error) throw new Error(`Failed to access file: ${error.message}`);
-      url = data.signedUrl;
+      resolvedUrl = data.signedUrl;
     }
   }
-  const response = await fetch(url);
+  const response = await fetch(resolvedUrl);
   if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
   const ab = await response.arrayBuffer();
   return { base64: encode(ab), size: ab.byteLength };
@@ -467,14 +510,15 @@ function determineStatus(score: number, critical: boolean, typed: boolean): stri
   return 'verified';
 }
 
-type ErrorType = 'no_profile' | 'file_too_large' | 'ai_gateway_error' | 'parse_error' | 'rate_limit' | 'typed_content_detected' | 'unknown';
+type ErrorType = 'no_profile' | 'file_too_large' | 'ai_gateway_error' | 'parse_error' | 'rate_limit' | 'typed_content_detected' | 'credits_exhausted' | 'unknown';
 
 function getFallback(errorType: ErrorType) {
   const map: Record<ErrorType, { score: number; risk: string; status: string; msg: string }> = {
     no_profile: { score: 50, risk: 'medium', status: 'needs_manual_review', msg: 'No handwriting profile found. Please upload your handwriting sample first.' },
     file_too_large: { score: 50, risk: 'medium', status: 'needs_manual_review', msg: 'Image too large for automatic verification.' },
     typed_content_detected: { score: 0, risk: 'high', status: 'needs_manual_review', msg: 'Typed/printed content detected.' },
-    rate_limit: { score: 50, risk: 'medium', status: 'needs_manual_review', msg: 'AI service busy. Manual review required.' },
+    rate_limit: { score: 50, risk: 'medium', status: 'needs_manual_review', msg: 'AI service busy. Will retry automatically.' },
+    credits_exhausted: { score: 50, risk: 'medium', status: 'needs_manual_review', msg: 'AI credits exhausted. Manual review required.' },
     ai_gateway_error: { score: 50, risk: 'medium', status: 'needs_manual_review', msg: 'AI temporarily unavailable.' },
     parse_error: { score: 50, risk: 'medium', status: 'needs_manual_review', msg: 'Could not process AI response.' },
     unknown: { score: 50, risk: 'medium', status: 'needs_manual_review', msg: 'Verification issue. Manual review required.' },
@@ -492,7 +536,7 @@ serve(async (req) => {
     const { submission_id, file_urls, file_url, student_profile_id } = body;
     const imageUrls: string[] = file_urls || (file_url ? [file_url] : []);
 
-    console.log('=== HANDWRITING VERIFICATION v7.0 START ===');
+    console.log('=== HANDWRITING VERIFICATION v7.0-enhanced START ===');
     console.log('Submission:', submission_id, '| Pages:', imageUrls.length);
 
     if (imageUrls.length === 0) throw new Error('No image URLs provided');
@@ -593,13 +637,16 @@ serve(async (req) => {
 
         console.log(`Page ${pageNum}: score=${cmp.similarity_score}, same=${cmp.same_writer}, evidence=${cmp.evidence_strength}`);
       } catch (err: any) {
-        console.error(`Page ${pageNum} error:`, err);
+        console.error(`Page ${pageNum} error:`, err.message);
+        // Propagate credits/rate limit errors as fallback
+        if (err.message?.includes('credits')) return await storeFallback('credits_exhausted');
+        if (err.message?.includes('Rate limit')) return await storeFallback('rate_limit');
         pageResults.push({ page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' });
       }
     }
 
     // Robust aggregation
-    const { score: overallScore, sameWriter: overallSameWriter } = aggregatePages(pageResults);
+    const { score: overallScore, sameWriter: overallSameWriter, method: aggMethod } = aggregatePages(pageResults);
 
     const confLevels = pageResults.map(p => p.confidence);
     const overallConf = confLevels.includes('low') ? 'low' : confLevels.includes('medium') ? 'medium' : 'high';
@@ -618,7 +665,7 @@ serve(async (req) => {
     const allMatches = firstPageComparison?.key_matching_features ?? [];
     const allDiffs = firstPageComparison?.key_differences ?? [];
 
-    console.log(`=== AGGREGATION: score=${overallScore}, same=${overallSameWriter}, typed=${hasTyped}, risk=${riskLevel}, rare=${totalRare}, evidence=${bestEvidence} ===`);
+    console.log(`=== RESULT: score=${overallScore}, same=${overallSameWriter}, typed=${hasTyped}, risk=${riskLevel}, rare=${totalRare}, evidence=${bestEvidence}, method=${aggMethod} ===`);
 
     await supabase.from('submissions').update({
       ai_similarity_score: overallScore,
@@ -634,7 +681,7 @@ serve(async (req) => {
         confidence_level: overallConf,
         has_typed_content: hasTyped,
         has_different_writer: hasDiffWriter,
-        aggregation_method: 'trimmed_median_with_consistency_bonus',
+        aggregation_method: aggMethod,
         page_results: pageResults,
         final_reasoning: reasoning,
         rare_feature_matches: totalRare,
@@ -653,7 +700,7 @@ serve(async (req) => {
       ],
     }).eq('id', submission_id);
 
-    console.log('=== VERIFICATION v7.0 COMPLETE ===');
+    console.log('=== VERIFICATION v7.0-enhanced COMPLETE ===');
 
     return new Response(JSON.stringify({
       success: true, similarity_score: overallScore, same_writer: overallSameWriter,
@@ -661,7 +708,7 @@ serve(async (req) => {
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error: any) {
-    console.error('Verification error:', error);
+    console.error('Verification error:', error.message);
     return new Response(JSON.stringify({ success: false, error: error.message }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
