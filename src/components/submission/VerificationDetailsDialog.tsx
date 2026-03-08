@@ -30,9 +30,10 @@ interface VerificationDetails {
   has_typed_content?: boolean;
   has_different_writer?: boolean;
   overall_similarity_score?: number;
-  // v6.0 weighted fields
+  // v7.0 enhanced fields
   rare_feature_matches?: number;
   evidence_strength?: string;
+  aggregation_method?: string;
 }
 
 interface VerificationDetailsDialogProps {
@@ -57,7 +58,7 @@ export const VerificationDetailsDialog = ({
   const riskLevel = submission.ai_risk_level;
   const pageResults = details?.page_results || [];
 
-  const isWeightedVersion = details?.algorithm_version?.includes('weighted') || details?.algorithm_version?.includes('6.0');
+  const isWeightedVersion = details?.algorithm_version?.includes('weighted') || details?.algorithm_version?.includes('6.0') || details?.algorithm_version?.includes('7.0');
 
   const getScoreColor = (score: number | null) => {
     if (score === null) return 'text-muted-foreground';
@@ -254,7 +255,8 @@ export const VerificationDetailsDialog = ({
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Rare features (e.g., left-leaning slant, cursive style) provide stronger evidence of identity than common features.
+                Rare features (e.g., left-leaning slant, cursive style, circle i-dots) provide stronger evidence of identity than common features.
+                {details?.aggregation_method === 'trimmed_median_with_consistency_bonus' && ' Scores use trimmed median aggregation with cross-page consistency bonus.'}
               </p>
             </div>
           )}
