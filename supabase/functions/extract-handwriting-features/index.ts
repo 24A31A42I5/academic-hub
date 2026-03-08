@@ -353,8 +353,7 @@ serve(async (req) => {
 
     console.log(`Consensus from ${extractedProfiles.length}/${EXTRACTION_ATTEMPTS} attempts`);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('student_details')
       .update({
         handwriting_feature_embedding: handwritingProfile,
