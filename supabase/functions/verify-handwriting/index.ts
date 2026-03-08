@@ -615,24 +615,8 @@ serve(async (req) => {
     if (overallSameWriter && !hasTyped) reasoning = `All ${pageResults.length} pages verified as same writer (${overallScore}% similarity).`;
     else if (!hasTyped && !hasDiffWriter) reasoning = `Verification: ${overallScore}% similarity across ${pageResults.length} pages.`;
 
-    // Collect matching features and differences from all page comparisons for the first page
-    // (for detailed display we re-compare to get the info)
-    let allMatches: string[] = [];
-    let allDiffs: string[] = [];
-    if (pageResults.length > 0 && pageResults[0].is_handwritten) {
-      // Use the first page's comparison for display
-      try {
-        const { base64: firstBase64 } = await fetchImageAsBase64(imageUrls[0], supabase);
-        if (firstBase64.length <= MAX_BASE64_SIZE) {
-          const { profile: firstSub } = await extractFeaturesOnce(firstBase64);
-          if (firstSub) {
-            const firstCmp = compareProfiles(referenceProfile, firstSub, weightMap);
-            allMatches = firstCmp.key_matching_features;
-            allDiffs = firstCmp.key_differences;
-          }
-        }
-      } catch { /* ignore re-extract errors */ }
-    }
+    const allMatches = firstPageComparison?.key_matching_features ?? [];
+    const allDiffs = firstPageComparison?.key_differences ?? [];
 
     console.log(`=== AGGREGATION: score=${overallScore}, same=${overallSameWriter}, typed=${hasTyped}, risk=${riskLevel}, rare=${totalRare}, evidence=${bestEvidence} ===`);
 
