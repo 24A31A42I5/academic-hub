@@ -367,6 +367,15 @@ const StudentHandwriting = () => {
           <CardContent>
             {hasHandwriting ? (
               <div className="space-y-4">
+                {needsRetraining && (
+                  <Alert className="border-amber-500/50 bg-amber-500/10">
+                    <AlertTriangle className="h-5 w-5 text-amber-500" />
+                    <AlertTitle className="text-amber-600">Profile Update Required</AlertTitle>
+                    <AlertDescription className="mt-1">
+                      Our verification system has been upgraded for better accuracy. Please click <strong>"Retrain"</strong> below to update your handwriting profile.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div className="flex items-center gap-2 p-4 bg-student/10 rounded-lg text-student">
                   <CheckCircle className="w-5 h-5" />
                   <span className="font-medium">Handwriting sample submitted</span>
