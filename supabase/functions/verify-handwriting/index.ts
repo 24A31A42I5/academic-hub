@@ -822,7 +822,7 @@ serve(async (req) => {
           status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '6.0-weighted-probabilistic',
+            algorithm_version: '7.0-toolcall',
             error_type: fallback.error_type,
             reason: fallback.message,
             page_count: imageUrls.length,
