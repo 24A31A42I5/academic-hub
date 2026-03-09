@@ -737,7 +737,7 @@ serve(async (req) => {
 
     const imageUrls: string[] = file_urls || (file_url ? [file_url] : []);
 
-    console.log('=== WEIGHTED PROBABILISTIC HANDWRITING VERIFICATION v6.0 START ===');
+    console.log('=== WEIGHTED PROBABILISTIC HANDWRITING VERIFICATION v7.0-toolcall START ===');
     console.log('Submission ID:', submission_id);
     console.log('Image URLs:', imageUrls.length, 'pages');
     console.log('Student Profile ID:', student_profile_id);
