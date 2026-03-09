@@ -226,51 +226,86 @@ function normalizeProfile(raw: any): HandwritingProfile | null {
 
 // ==================== STRICT EXTRACTION PROMPT ====================
 
-// ==================== TOOL CALLING SCHEMA ====================
+const EXTRACTION_PROMPT = `You are a forensic handwriting analyst extracting biometric features from a handwriting sample. You MUST return a structured JSON object with EXACT enum values for each feature.
 
-const EXTRACTION_TOOL = {
-  type: "function" as const,
-  function: {
-    name: "report_handwriting_features",
-    description: "Report the extracted handwriting features from the analyzed image.",
-    parameters: {
-      type: "object",
-      properties: {
-        slant: { type: "string", enum: ["left_lean", "right_lean", "upright"], description: "Vertical stroke angle" },
-        stroke_weight: { type: "string", enum: ["thin", "medium", "thick"], description: "Line thickness" },
-        letter_spacing: { type: "string", enum: ["tight", "normal", "wide"], description: "Space between letters" },
-        word_spacing: { type: "string", enum: ["tight", "normal", "wide"], description: "Space between words" },
-        baseline: { type: "string", enum: ["straight", "wavy", "variable"], description: "Line alignment" },
-        height_ratio: { type: "string", enum: ["short", "moderate", "tall"], description: "Upper/lower height ratio" },
-        writing_style: { type: "string", enum: ["cursive", "print", "mixed"], description: "Connection pattern" },
-        letter_a: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
-        letter_e: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
-        letter_g: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
-        letter_r: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
-        letter_t: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
-        letter_s: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
-        is_handwritten: { type: "boolean", description: "true if handwritten, false if typed/printed" },
-        confidence_level: { type: "number", description: "Image quality 0.0-1.0" }
-      },
-      required: ["slant", "stroke_weight", "letter_spacing", "word_spacing", "baseline", "height_ratio", "writing_style", "letter_a", "letter_e", "letter_g", "letter_r", "letter_t", "letter_s", "is_handwritten", "confidence_level"],
-      additionalProperties: false
-    }
-  }
-};
+CRITICAL RULES:
+1. Use ONLY the exact string values specified below
+2. Do NOT use synonyms, descriptions, or variations
+3. Return valid JSON without markdown code fences
+4. Do NOT include preamble or explanation text
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a forensic handwriting analyst. Analyze the handwriting image and extract biometric features using the report_handwriting_features tool.
+FEATURE EXTRACTION INSTRUCTIONS:
 
-ANALYSIS RULES:
-- SLANT: Measure average vertical stroke angle. <85° = left_lean, 85-95° = upright, >95° = right_lean
-- STROKE_WEIGHT: Compare to standard ballpoint pen. Thinner = thin, thicker = thick
-- LETTER_SPACING: Letters touching = tight, large gaps = wide
-- WORD_SPACING: Gaps narrow (<8mm) = tight, large (>15mm) = wide
-- BASELINE: Straight line = straight, curves = wavy, inconsistent = variable
-- HEIGHT_RATIO: Uppercase 2x+ taller = tall, 1.3-1.7x = moderate, barely taller = short
-- WRITING_STYLE: Most connect = cursive, separated = print, partial = mixed
-- LETTER SHAPES: rounded/angular/looped/open/closed/simple/mixed
-- IS_HANDWRITTEN: true for handwritten, false for typed
-- CONFIDENCE: 0.9 clear, 0.7 blurry, 0.5 poor`;
+**1. SLANT** — Measure vertical stroke angle relative to baseline
+- If strokes lean noticeably left: return EXACTLY "left_lean"
+- If strokes lean noticeably right: return EXACTLY "right_lean"
+- If strokes are vertical or nearly vertical: return EXACTLY "upright"
+Decision rule: Estimate average angle. <80° = left_lean, 80-100° = upright, >100° = right_lean
+
+**2. STROKE_WEIGHT** — Observe line thickness
+- If lines are thin and light: return EXACTLY "thin"
+- If lines are thick and heavy: return EXACTLY "thick"
+- Otherwise: return EXACTLY "medium"
+
+**3. LETTER_SPACING** — Measure space between letters within words
+- If letters touch or nearly touch: return EXACTLY "tight"
+- If letters have large gaps: return EXACTLY "wide"
+- Otherwise: return EXACTLY "normal"
+
+**4. WORD_SPACING** — Measure space between words
+- If word gaps are narrow: return EXACTLY "tight"
+- If word gaps are large: return EXACTLY "wide"
+- Otherwise: return EXACTLY "normal"
+
+**5. BASELINE** — Observe line alignment
+- If writing follows a straight horizontal line: return EXACTLY "straight"
+- If writing curves or waves: return EXACTLY "wavy"
+- If baseline is inconsistent: return EXACTLY "variable"
+
+**6. HEIGHT_RATIO** — Compare uppercase to lowercase heights
+- If uppercase is 2x or taller than lowercase: return EXACTLY "tall"
+- If uppercase is 1.3-1.7x lowercase: return EXACTLY "moderate"
+- If uppercase barely taller: return EXACTLY "short"
+
+**7. WRITING_STYLE** — Identify connection pattern
+- If most letters connect in flowing cursive: return EXACTLY "cursive"
+- If letters are separated: return EXACTLY "print"
+- If partially connected: return EXACTLY "mixed"
+
+**8. LETTER_FORMATIONS** — For each letter (a, e, g, r, t, s), classify shape:
+- Smooth curves dominant: return EXACTLY "rounded"
+- Sharp angles dominant: return EXACTLY "angular"
+- Has decorative loops: return EXACTLY "looped"
+- Open tops/sides: return EXACTLY "open"
+- Fully enclosed: return EXACTLY "closed"
+- Plain/simple form: return EXACTLY "simple"
+- Mixed characteristics: return EXACTLY "mixed"
+
+**9. IS_HANDWRITTEN** — true if handwritten, false if typed/printed
+
+**10. CONFIDENCE_LEVEL** — 0.0 to 1.0 based on image quality
+
+REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
+
+{
+  "slant": "left_lean",
+  "stroke_weight": "medium",
+  "letter_spacing": "normal",
+  "word_spacing": "normal",
+  "baseline": "straight",
+  "height_ratio": "moderate",
+  "writing_style": "mixed",
+  "letter_formations": {
+    "a": "rounded",
+    "e": "open",
+    "g": "looped",
+    "r": "angular",
+    "t": "simple",
+    "s": "closed"
+  },
+  "is_handwritten": true,
+  "confidence_level": 0.9
+}`;
 
 // ==================== FEATURE EXTRACTION (Stage 1) ====================
 
@@ -278,10 +313,12 @@ const EXTRACTION_ATTEMPTS = 3;
 
 function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
   if (values.length === 0) return fallback;
+
   const counts = new Map<T, number>();
   for (const value of values) {
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
+
   let bestValue = fallback;
   let bestCount = -1;
   for (const [value, count] of counts.entries()) {
@@ -290,11 +327,13 @@ function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
       bestCount = count;
     }
   }
+
   return bestValue;
 }
 
 function buildConsensusProfile(profiles: HandwritingProfile[]): HandwritingProfile {
   const base = profiles[0];
+
   return {
     slant: pickMostFrequent(profiles.map((p) => p.slant), base.slant),
     stroke_weight: pickMostFrequent(profiles.map((p) => p.stroke_weight), base.stroke_weight),
@@ -315,41 +354,6 @@ function buildConsensusProfile(profiles: HandwritingProfile[]): HandwritingProfi
   };
 }
 
-function toolCallToProfile(args: any): HandwritingProfile | null {
-  try {
-    const profile: HandwritingProfile = {
-      slant: args.slant,
-      stroke_weight: args.stroke_weight,
-      letter_spacing: args.letter_spacing,
-      word_spacing: args.word_spacing,
-      baseline: args.baseline,
-      height_ratio: args.height_ratio,
-      writing_style: args.writing_style,
-      letter_formations: {
-        a: args.letter_a,
-        e: args.letter_e,
-        g: args.letter_g,
-        r: args.letter_r,
-        t: args.letter_t,
-        s: args.letter_s,
-      },
-      confidence_level: typeof args.confidence_level === 'number'
-        ? Math.max(0, Math.min(1, args.confidence_level))
-        : 0.5,
-    };
-    // Validate all enums
-    for (const field of ['slant', 'stroke_weight', 'letter_spacing', 'word_spacing', 'baseline', 'height_ratio', 'writing_style'] as const) {
-      if (!VALID_ENUMS[field].includes(profile[field])) return null;
-    }
-    for (const letter of ['a', 'e', 'g', 'r', 't', 's'] as const) {
-      if (!VALID_ENUMS.letter_shape.includes(profile.letter_formations[letter])) return null;
-    }
-    return profile;
-  } catch {
-    return null;
-  }
-}
-
 async function extractPageFeaturesOnce(
   pageNumber: number,
   imageBase64: string,
@@ -365,14 +369,12 @@ async function extractPageFeaturesOnce(
       model: 'google/gemini-2.5-flash',
       temperature: 0,
       top_p: 0.1,
-      tools: [EXTRACTION_TOOL],
-      tool_choice: { type: "function", function: { name: "report_handwriting_features" } },
+      response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
         {
           role: 'user',
           content: [
-            { type: 'text', text: 'Analyze this handwriting sample and extract all biometric features using the tool.' },
+            { type: 'text', text: EXTRACTION_PROMPT },
             {
               type: 'image_url',
               image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
@@ -391,32 +393,22 @@ async function extractPageFeaturesOnce(
   }
 
   const aiData = await aiResponse.json();
-  const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+  const responseText = aiData.choices?.[0]?.message?.content || '';
 
-  if (toolCall && toolCall.function.name === 'report_handwriting_features') {
-    const args = typeof toolCall.function.arguments === 'string'
-      ? JSON.parse(toolCall.function.arguments)
-      : toolCall.function.arguments;
-    
-    const is_handwritten = args.is_handwritten !== false;
-    const profile = toolCallToProfile(args);
+  let cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    return { profile: null, is_handwritten: true };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    const is_handwritten = parsed.is_handwritten !== false;
+    const profile = normalizeProfile(parsed);
     return { profile, is_handwritten };
+  } catch {
+    return { profile: null, is_handwritten: true };
   }
-
-  // Fallback: try parsing content as JSON for backward compat
-  const content = aiData.choices?.[0]?.message?.content || '';
-  console.warn(`Page ${pageNumber}: No tool call, trying JSON fallback`);
-  const jsonMatch = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim().match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const is_handwritten = parsed.is_handwritten !== false;
-      const profile = normalizeProfile(parsed);
-      return { profile, is_handwritten };
-    } catch { /* fall through */ }
-  }
-
-  return { profile: null, is_handwritten: true };
 }
 
 async function extractPageFeatures(
@@ -737,7 +729,7 @@ serve(async (req) => {
 
     const imageUrls: string[] = file_urls || (file_url ? [file_url] : []);
 
-    console.log('=== WEIGHTED PROBABILISTIC HANDWRITING VERIFICATION v7.0-toolcall START ===');
+    console.log('=== WEIGHTED PROBABILISTIC HANDWRITING VERIFICATION v6.0 START ===');
     console.log('Submission ID:', submission_id);
     console.log('Image URLs:', imageUrls.length, 'pages');
     console.log('Student Profile ID:', student_profile_id);
@@ -822,7 +814,7 @@ serve(async (req) => {
           status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '7.0-toolcall',
+            algorithm_version: '6.0-weighted-probabilistic',
             error_type: fallback.error_type,
             reason: fallback.message,
             page_count: imageUrls.length,
@@ -856,7 +848,7 @@ serve(async (req) => {
           status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '7.0-toolcall',
+            algorithm_version: '6.0-weighted-probabilistic',
             error_type: 'parse_error',
             reason: fallback.message,
             page_count: imageUrls.length,
@@ -1032,7 +1024,7 @@ serve(async (req) => {
         status: status,
         verified_at: new Date().toISOString(),
         ai_analysis_details: {
-          algorithm_version: '7.0-toolcall',
+          algorithm_version: '6.0-weighted-probabilistic',
           page_count: pageResults.length,
           overall_similarity_score: overallSimilarity,
           same_writer: overallSameWriter,
