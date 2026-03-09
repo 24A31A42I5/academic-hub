@@ -330,6 +330,8 @@ const StudentHandwriting = () => {
 
   const hasHandwriting = !!studentDetails?.handwriting_url;
   const hasFeatures = !!studentDetails?.handwriting_feature_embedding;
+  const profileVersion = (studentDetails?.handwriting_feature_embedding as any)?.version;
+  const needsRetraining = hasFeatures && profileVersion && !profileVersion.startsWith('7.');
 
   return (
     <DashboardLayout title="My Handwriting" role="student" navItems={navItems}>
