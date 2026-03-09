@@ -46,12 +46,10 @@ const EXTRACTION_ATTEMPTS = 3;
 
 function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
   if (values.length === 0) return fallback;
-
   const counts = new Map<T, number>();
   for (const value of values) {
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
-
   let best = fallback;
   let bestCount = -1;
   for (const [value, count] of counts.entries()) {
@@ -60,13 +58,11 @@ function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
       bestCount = count;
     }
   }
-
   return best;
 }
 
 function buildConsensusProfile(profiles: any[]): any {
   const base = profiles[0];
-
   return {
     slant: pickMostFrequent(profiles.map((p) => p.slant), base.slant),
     stroke_weight: pickMostFrequent(profiles.map((p) => p.stroke_weight), base.stroke_weight),
@@ -88,94 +84,85 @@ function buildConsensusProfile(profiles: any[]): any {
   };
 }
 
-// ==================== EXTRACTION PROMPT ====================
+// ==================== TOOL CALLING SCHEMA ====================
 
-const EXTRACTION_PROMPT = `You are a forensic handwriting analyst extracting biometric features from a handwriting sample. You MUST return a structured JSON object with EXACT enum values for each feature.
+const EXTRACTION_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "report_handwriting_features",
+    description: "Report the extracted handwriting features from the analyzed image.",
+    parameters: {
+      type: "object",
+      properties: {
+        slant: {
+          type: "string",
+          enum: ["left_lean", "right_lean", "upright"],
+          description: "Vertical stroke angle: left_lean (<85°), upright (85-95°), right_lean (>95°)"
+        },
+        stroke_weight: {
+          type: "string",
+          enum: ["thin", "medium", "thick"],
+          description: "Line thickness compared to standard ballpoint pen"
+        },
+        letter_spacing: {
+          type: "string",
+          enum: ["tight", "normal", "wide"],
+          description: "Space between letters within words"
+        },
+        word_spacing: {
+          type: "string",
+          enum: ["tight", "normal", "wide"],
+          description: "Space between words"
+        },
+        baseline: {
+          type: "string",
+          enum: ["straight", "wavy", "variable"],
+          description: "Line alignment consistency"
+        },
+        height_ratio: {
+          type: "string",
+          enum: ["short", "moderate", "tall"],
+          description: "Uppercase to lowercase height ratio"
+        },
+        writing_style: {
+          type: "string",
+          enum: ["cursive", "print", "mixed"],
+          description: "Letter connection pattern"
+        },
+        letter_a: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
+        letter_e: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
+        letter_g: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
+        letter_r: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
+        letter_t: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
+        letter_s: { type: "string", enum: ["rounded", "angular", "looped", "open", "closed", "simple", "mixed"] },
+        is_handwritten: {
+          type: "boolean",
+          description: "true if content is handwritten, false if typed/printed"
+        },
+        confidence_level: {
+          type: "number",
+          description: "Feature visibility quality from 0.0 to 1.0. Clear=0.9, blurry=0.7, poor=0.5"
+        }
+      },
+      required: ["slant", "stroke_weight", "letter_spacing", "word_spacing", "baseline", "height_ratio", "writing_style", "letter_a", "letter_e", "letter_g", "letter_r", "letter_t", "letter_s", "is_handwritten", "confidence_level"],
+      additionalProperties: false
+    }
+  }
+};
 
-CRITICAL RULES:
-1. Use ONLY the exact string values specified below
-2. Do NOT use synonyms, descriptions, or variations
-3. Return valid JSON without markdown code fences
-4. Do NOT include preamble or explanation text
+const SYSTEM_PROMPT = `You are a forensic handwriting analyst. Analyze the handwriting image and extract biometric features using the report_handwriting_features tool.
 
-FEATURE EXTRACTION INSTRUCTIONS:
-
-**1. SLANT** — Measure vertical stroke angle relative to baseline
-- If strokes lean noticeably left: return EXACTLY "left_lean"
-- If strokes lean noticeably right: return EXACTLY "right_lean"
-- If strokes are vertical or nearly vertical: return EXACTLY "upright"
-Decision rule: Estimate average angle. <80° = left_lean, 80-100° = upright, >100° = right_lean
-
-**2. STROKE_WEIGHT** — Observe line thickness
-- If lines are thin and light: return EXACTLY "thin"
-- If lines are thick and heavy: return EXACTLY "thick"
-- Otherwise: return EXACTLY "medium"
-Decision rule: Compare to typical ballpoint pen. Noticeably thinner = thin, noticeably thicker = thick
-
-**3. LETTER_SPACING** — Measure space between letters within words
-- If letters touch or nearly touch: return EXACTLY "tight"
-- If letters have large gaps (>5mm): return EXACTLY "wide"
-- Otherwise: return EXACTLY "normal"
-
-**4. WORD_SPACING** — Measure space between words
-- If word gaps are narrow (<8mm): return EXACTLY "tight"
-- If word gaps are large (>15mm): return EXACTLY "wide"
-- Otherwise: return EXACTLY "normal"
-
-**5. BASELINE** — Observe line alignment
-- If writing follows a straight horizontal line: return EXACTLY "straight"
-- If writing curves or waves: return EXACTLY "wavy"
-- If baseline is inconsistent: return EXACTLY "variable"
-
-**6. HEIGHT_RATIO** — Compare uppercase to lowercase heights
-- If uppercase is 2x or taller than lowercase: return EXACTLY "tall"
-- If uppercase is 1.3-1.7x lowercase: return EXACTLY "moderate"
-- If uppercase barely taller: return EXACTLY "short"
-
-**7. WRITING_STYLE** — Identify connection pattern
-- If most letters connect in flowing cursive: return EXACTLY "cursive"
-- If letters are separated: return EXACTLY "print"
-- If partially connected: return EXACTLY "mixed"
-
-**8. LETTER_FORMATIONS** — For each letter (a, e, g, r, t, s), classify shape:
-- Smooth curves dominant: return EXACTLY "rounded"
-- Sharp angles dominant: return EXACTLY "angular"
-- Has decorative loops: return EXACTLY "looped"
-- Open tops/sides: return EXACTLY "open"
-- Fully enclosed: return EXACTLY "closed"
-- Plain/simple form: return EXACTLY "simple"
-- Mixed characteristics: return EXACTLY "mixed"
-
-**9. IS_HANDWRITTEN** — Content type detection
-- Handwritten text: return true
-- Typed/printed text: return false
-
-**10. CONFIDENCE_LEVEL** — Feature visibility (0.0 to 1.0)
-- Clear, well-lit image with distinct features: 0.9
-- Slightly blurry or low contrast: 0.7
-- Poor quality or unclear features: 0.5
-
-REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
-
-{
-  "slant": "left_lean",
-  "stroke_weight": "medium",
-  "letter_spacing": "normal",
-  "word_spacing": "normal",
-  "baseline": "straight",
-  "height_ratio": "moderate",
-  "writing_style": "mixed",
-  "letter_formations": {
-    "a": "rounded",
-    "e": "open",
-    "g": "looped",
-    "r": "angular",
-    "t": "simple",
-    "s": "closed"
-  },
-  "is_handwritten": true,
-  "confidence_level": 0.9
-}`;
+ANALYSIS RULES:
+- SLANT: Measure average vertical stroke angle. <85° = left_lean, 85-95° = upright, >95° = right_lean
+- STROKE_WEIGHT: Compare line thickness to standard ballpoint pen. Noticeably thinner = thin, thicker = thick
+- LETTER_SPACING: Letters touching/nearly touching = tight, large gaps = wide
+- WORD_SPACING: Word gaps narrow (<8mm) = tight, large (>15mm) = wide
+- BASELINE: Follows straight line = straight, curves/waves = wavy, inconsistent = variable
+- HEIGHT_RATIO: Uppercase 2x+ taller = tall, 1.3-1.7x = moderate, barely taller = short
+- WRITING_STYLE: Most letters connect = cursive, separated = print, partial = mixed
+- LETTER SHAPES: For each letter (a,e,g,r,t,s): rounded (smooth curves), angular (sharp), looped (decorative loops), open (open tops/sides), closed (fully enclosed), simple (plain), mixed
+- IS_HANDWRITTEN: true for handwritten, false for typed/printed
+- CONFIDENCE: 0.9 for clear images, 0.7 for slightly blurry, 0.5 for poor quality`;
 
 // ==================== HELPERS ====================
 
@@ -189,6 +176,30 @@ async function fetchFileAsBase64(url: string): Promise<string> {
   return encode(arrayBuffer);
 }
 
+function toolCallToProfile(args: any): any {
+  return {
+    slant: args.slant,
+    stroke_weight: args.stroke_weight,
+    letter_spacing: args.letter_spacing,
+    word_spacing: args.word_spacing,
+    baseline: args.baseline,
+    height_ratio: args.height_ratio,
+    writing_style: args.writing_style,
+    letter_formations: {
+      a: args.letter_a,
+      e: args.letter_e,
+      g: args.letter_g,
+      r: args.letter_r,
+      t: args.letter_t,
+      s: args.letter_s,
+    },
+    is_handwritten: args.is_handwritten,
+    confidence_level: typeof args.confidence_level === 'number'
+      ? Math.max(0, Math.min(1, args.confidence_level))
+      : 0.5,
+  };
+}
+
 // ==================== MAIN HANDLER ====================
 
 serve(async (req) => {
@@ -199,7 +210,7 @@ serve(async (req) => {
   try {
     const { image_url, student_details_id } = await req.json();
 
-    console.log('=== HANDWRITING FEATURE EXTRACTION v6.0 START ===');
+    console.log('=== HANDWRITING FEATURE EXTRACTION v7.0-toolcall START ===');
     console.log('Student details ID:', student_details_id);
     console.log('Image URL:', image_url);
 
@@ -211,11 +222,10 @@ serve(async (req) => {
       throw new Error('Missing required parameters: image_url and student_details_id');
     }
 
-    // Fetch image as base64
     const imageBase64 = await fetchFileAsBase64(image_url);
     console.log('Image fetched, base64 length:', imageBase64.length);
 
-    console.log(`Calling Gemini AI for strict enum extraction (${EXTRACTION_ATTEMPTS} attempts)...`);
+    console.log(`Calling AI with tool calling for strict enum extraction (${EXTRACTION_ATTEMPTS} attempts)...`);
 
     const extractedProfiles: any[] = [];
     let nonHandwrittenVotes = 0;
@@ -232,12 +242,14 @@ serve(async (req) => {
             model: 'google/gemini-2.5-flash',
             temperature: 0,
             top_p: 0.1,
-            response_format: { type: 'json_object' },
+            tools: [EXTRACTION_TOOL],
+            tool_choice: { type: "function", function: { name: "report_handwriting_features" } },
             messages: [
+              { role: 'system', content: SYSTEM_PROMPT },
               {
                 role: 'user',
                 content: [
-                  { type: 'text', text: EXTRACTION_PROMPT },
+                  { type: 'text', text: 'Analyze this handwriting sample and extract all biometric features using the tool.' },
                   {
                     type: 'image_url',
                     image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
@@ -257,36 +269,44 @@ serve(async (req) => {
         }
 
         const aiData = await aiResponse.json();
-        const responseText = aiData.choices?.[0]?.message?.content || '';
-        console.log(`Gemini response attempt ${attempt}/${EXTRACTION_ATTEMPTS}, length:`, responseText.length);
+        const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
 
-        const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          console.error(`No JSON found in attempt ${attempt}`);
+        if (!toolCall || toolCall.function.name !== 'report_handwriting_features') {
+          // Fallback: try parsing content as JSON
+          const content = aiData.choices?.[0]?.message?.content || '';
+          console.warn(`Attempt ${attempt}: No tool call returned, trying JSON fallback. Content length: ${content.length}`);
+          const jsonMatch = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim().match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.is_handwritten === false) nonHandwrittenVotes++;
+            if (validateProfile(parsed)) {
+              if (typeof parsed.confidence_level !== 'number') parsed.confidence_level = 0.5;
+              else parsed.confidence_level = Math.max(0, Math.min(1, parsed.confidence_level));
+              extractedProfiles.push(parsed);
+              console.log(`Attempt ${attempt}: JSON fallback succeeded`);
+            }
+          }
           continue;
         }
 
-        const parsed = JSON.parse(jsonMatch[0]);
+        const args = typeof toolCall.function.arguments === 'string'
+          ? JSON.parse(toolCall.function.arguments)
+          : toolCall.function.arguments;
 
-        if (parsed.is_handwritten === false) {
+        console.log(`Attempt ${attempt}: Tool call args:`, JSON.stringify(args));
+
+        const profile = toolCallToProfile(args);
+
+        if (profile.is_handwritten === false) {
           nonHandwrittenVotes++;
         }
 
-        // Validate strict enum values
-        if (!validateProfile(parsed)) {
-          console.error(`Strict enum validation failed for attempt ${attempt}`);
+        if (!validateProfile(profile)) {
+          console.error(`Attempt ${attempt}: validation failed despite tool calling`);
           continue;
         }
 
-        // Ensure confidence_level is a number in range
-        if (typeof parsed.confidence_level !== 'number') {
-          parsed.confidence_level = 0.5;
-        } else {
-          parsed.confidence_level = Math.max(0, Math.min(1, parsed.confidence_level));
-        }
-
-        extractedProfiles.push(parsed);
+        extractedProfiles.push(profile);
         console.log(`Extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} succeeded`);
       } catch (attemptError) {
         console.error(`Extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} failed:`, attemptError);
@@ -306,14 +326,13 @@ serve(async (req) => {
       : buildConsensusProfile(extractedProfiles);
 
     // Add metadata
-    handwritingProfile.version = '6.0-weighted';
+    handwritingProfile.version = '7.0-toolcall';
     handwritingProfile.trained_at = new Date().toISOString();
     handwritingProfile.reference_image_url = image_url;
 
     console.log(`Built profile consensus from ${extractedProfiles.length}/${EXTRACTION_ATTEMPTS} successful attempts`);
     console.log('Validated handwriting profile:', JSON.stringify(handwritingProfile, null, 2));
 
-    // Create Supabase client and update student_details
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const { error: updateError } = await supabase
@@ -329,12 +348,12 @@ serve(async (req) => {
       throw new Error('Failed to save handwriting profile');
     }
 
-    console.log('=== HANDWRITING FEATURE EXTRACTION v6.0 COMPLETE ===');
+    console.log('=== HANDWRITING FEATURE EXTRACTION v7.0-toolcall COMPLETE ===');
 
     return new Response(JSON.stringify({
       success: true,
-      message: 'Handwriting profile created successfully with strict enum validation',
-      profile_version: '6.0-weighted',
+      message: 'Handwriting profile created with tool-call enforced enums',
+      profile_version: '7.0-toolcall',
       features_validated: true,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
