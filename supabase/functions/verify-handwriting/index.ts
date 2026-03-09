@@ -1032,7 +1032,7 @@ serve(async (req) => {
         status: status,
         verified_at: new Date().toISOString(),
         ai_analysis_details: {
-          algorithm_version: '6.0-weighted-probabilistic',
+          algorithm_version: '7.0-toolcall',
           page_count: pageResults.length,
           overall_similarity_score: overallSimilarity,
           same_writer: overallSameWriter,
