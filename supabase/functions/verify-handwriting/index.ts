@@ -856,7 +856,7 @@ serve(async (req) => {
           status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '6.0-weighted-probabilistic',
+            algorithm_version: '7.0-toolcall',
             error_type: 'parse_error',
             reason: fallback.message,
             page_count: imageUrls.length,
