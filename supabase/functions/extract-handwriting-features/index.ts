@@ -21,12 +21,19 @@ const VALID_ENUMS: Record<string, string[]> = {
   baseline: ['straight', 'wavy', 'variable'],
   height_ratio: ['short', 'moderate', 'tall'],
   writing_style: ['cursive', 'print', 'mixed'],
+  connectivity: ['connected', 'semi_connected', 'disconnected'],
+  line_stability: ['straight', 'rising', 'descending', 'erratic'],
   letter_shape: ['rounded', 'angular', 'looped', 'open', 'closed', 'simple', 'mixed'],
 };
 
+const REQUIRED_FIELDS = [
+  'slant', 'stroke_weight', 'letter_spacing', 'word_spacing',
+  'baseline', 'height_ratio', 'writing_style', 'connectivity', 'line_stability'
+];
+
 function validateProfile(profile: any): boolean {
-  for (const field of ['slant', 'stroke_weight', 'letter_spacing', 'word_spacing', 'baseline', 'height_ratio', 'writing_style']) {
-    if (!VALID_ENUMS[field].includes(profile[field])) {
+  for (const field of REQUIRED_FIELDS) {
+    if (!VALID_ENUMS[field]?.includes(profile[field])) {
       console.error(`Invalid ${field}:`, profile[field]);
       return false;
     }
@@ -46,12 +53,10 @@ const EXTRACTION_ATTEMPTS = 3;
 
 function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
   if (values.length === 0) return fallback;
-
   const counts = new Map<T, number>();
   for (const value of values) {
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
-
   let best = fallback;
   let bestCount = -1;
   for (const [value, count] of counts.entries()) {
@@ -60,13 +65,11 @@ function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
       bestCount = count;
     }
   }
-
   return best;
 }
 
 function buildConsensusProfile(profiles: any[]): any {
   const base = profiles[0];
-
   return {
     slant: pickMostFrequent(profiles.map((p) => p.slant), base.slant),
     stroke_weight: pickMostFrequent(profiles.map((p) => p.stroke_weight), base.stroke_weight),
@@ -75,6 +78,8 @@ function buildConsensusProfile(profiles: any[]): any {
     baseline: pickMostFrequent(profiles.map((p) => p.baseline), base.baseline),
     height_ratio: pickMostFrequent(profiles.map((p) => p.height_ratio), base.height_ratio),
     writing_style: pickMostFrequent(profiles.map((p) => p.writing_style), base.writing_style),
+    connectivity: pickMostFrequent(profiles.map((p) => p.connectivity ?? 'semi_connected'), base.connectivity ?? 'semi_connected'),
+    line_stability: pickMostFrequent(profiles.map((p) => p.line_stability ?? 'straight'), base.line_stability ?? 'straight'),
     letter_formations: {
       a: pickMostFrequent(profiles.map((p) => p.letter_formations?.a ?? 'simple'), base.letter_formations?.a ?? 'simple'),
       e: pickMostFrequent(profiles.map((p) => p.letter_formations?.e ?? 'simple'), base.letter_formations?.e ?? 'simple'),
@@ -101,43 +106,52 @@ CRITICAL RULES:
 FEATURE EXTRACTION INSTRUCTIONS:
 
 **1. SLANT** — Measure vertical stroke angle relative to baseline
-- If strokes lean noticeably left: return EXACTLY "left_lean"
-- If strokes lean noticeably right: return EXACTLY "right_lean"
-- If strokes are vertical or nearly vertical: return EXACTLY "upright"
-Decision rule: Estimate average angle. <80° = left_lean, 80-100° = upright, >100° = right_lean
+- If strokes lean noticeably left (angle < 85°): return EXACTLY "left_lean"
+- If strokes lean noticeably right (angle > 95°): return EXACTLY "right_lean"
+- If strokes are vertical or nearly vertical (85-95°): return EXACTLY "upright"
 
 **2. STROKE_WEIGHT** — Observe line thickness
-- If lines are thin and light: return EXACTLY "thin"
-- If lines are thick and heavy: return EXACTLY "thick"
-- Otherwise: return EXACTLY "medium"
-Decision rule: Compare to typical ballpoint pen. Noticeably thinner = thin, noticeably thicker = thick
+- If lines are noticeably thinner than standard ballpoint pen: return EXACTLY "thin"
+- If lines are noticeably thicker than standard ballpoint pen: return EXACTLY "thick"
+- If lines are standard thickness: return EXACTLY "medium"
 
-**3. LETTER_SPACING** — Measure space between letters within words
-- If letters touch or nearly touch: return EXACTLY "tight"
-- If letters have large gaps (>5mm): return EXACTLY "wide"
-- Otherwise: return EXACTLY "normal"
+**3. LETTER_SPACING** — Measure horizontal space between letters within words
+- If letters touch or nearly touch (< 2mm gap): return EXACTLY "tight"
+- If letters have large gaps (> 5mm): return EXACTLY "wide"
+- If spacing is standard (2-5mm): return EXACTLY "normal"
 
-**4. WORD_SPACING** — Measure space between words
-- If word gaps are narrow (<8mm): return EXACTLY "tight"
-- If word gaps are large (>15mm): return EXACTLY "wide"
-- Otherwise: return EXACTLY "normal"
+**4. WORD_SPACING** — Measure horizontal space between words
+- If word gaps are narrow (< 8mm): return EXACTLY "tight"
+- If word gaps are large (> 15mm): return EXACTLY "wide"
+- If spacing is standard (8-15mm): return EXACTLY "normal"
 
-**5. BASELINE** — Observe line alignment
+**5. BASELINE** — Observe whether writing sits on a straight horizontal line
 - If writing follows a straight horizontal line: return EXACTLY "straight"
-- If writing curves or waves: return EXACTLY "wavy"
-- If baseline is inconsistent: return EXACTLY "variable"
+- If writing curves or waves consistently: return EXACTLY "wavy"
+- If baseline is inconsistent or erratic: return EXACTLY "variable"
 
-**6. HEIGHT_RATIO** — Compare uppercase to lowercase heights
+**6. HEIGHT_RATIO** — Compare the height of uppercase to lowercase letters
 - If uppercase is 2x or taller than lowercase: return EXACTLY "tall"
-- If uppercase is 1.3-1.7x lowercase: return EXACTLY "moderate"
-- If uppercase barely taller: return EXACTLY "short"
+- If uppercase is 1.3-1.7x the height of lowercase: return EXACTLY "moderate"
+- If uppercase is barely taller than lowercase: return EXACTLY "short"
 
-**7. WRITING_STYLE** — Identify connection pattern
+**7. WRITING_STYLE** — Identify the connection pattern between letters
 - If most letters connect in flowing cursive: return EXACTLY "cursive"
-- If letters are separated: return EXACTLY "print"
+- If letters are clearly separated (print): return EXACTLY "print"
 - If partially connected: return EXACTLY "mixed"
 
-**8. LETTER_FORMATIONS** — For each letter (a, e, g, r, t, s), classify shape:
+**8. CONNECTIVITY** — Measure how strokes connect between letters
+- If strokes flow continuously between most letters: return EXACTLY "connected"
+- If some letters connect, some don't: return EXACTLY "semi_connected"
+- If letters are clearly isolated: return EXACTLY "disconnected"
+
+**9. LINE_STABILITY** — Observe the trend of baseline across the page
+- If baseline maintains straight horizontal: return EXACTLY "straight"
+- If baseline trends upward across the page: return EXACTLY "rising"
+- If baseline trends downward: return EXACTLY "descending"
+- If baseline varies inconsistently: return EXACTLY "erratic"
+
+**10. LETTER_FORMATIONS** — For each letter (a, e, g, r, t, s), classify shape:
 - Smooth curves dominant: return EXACTLY "rounded"
 - Sharp angles dominant: return EXACTLY "angular"
 - Has decorative loops: return EXACTLY "looped"
@@ -146,11 +160,11 @@ Decision rule: Compare to typical ballpoint pen. Noticeably thinner = thin, noti
 - Plain/simple form: return EXACTLY "simple"
 - Mixed characteristics: return EXACTLY "mixed"
 
-**9. IS_HANDWRITTEN** — Content type detection
+**11. IS_HANDWRITTEN** — Content type detection
 - Handwritten text: return true
 - Typed/printed text: return false
 
-**10. CONFIDENCE_LEVEL** — Feature visibility (0.0 to 1.0)
+**12. CONFIDENCE_LEVEL** — Feature visibility (0.0 to 1.0)
 - Clear, well-lit image with distinct features: 0.9
 - Slightly blurry or low contrast: 0.7
 - Poor quality or unclear features: 0.5
@@ -158,13 +172,15 @@ Decision rule: Compare to typical ballpoint pen. Noticeably thinner = thin, noti
 REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
 
 {
-  "slant": "left_lean",
+  "slant": "right_lean",
   "stroke_weight": "medium",
   "letter_spacing": "normal",
   "word_spacing": "normal",
   "baseline": "straight",
   "height_ratio": "moderate",
-  "writing_style": "mixed",
+  "writing_style": "print",
+  "connectivity": "semi_connected",
+  "line_stability": "straight",
   "letter_formations": {
     "a": "rounded",
     "e": "open",
@@ -199,7 +215,7 @@ serve(async (req) => {
   try {
     const { image_url, student_details_id } = await req.json();
 
-    console.log('=== HANDWRITING FEATURE EXTRACTION v6.0 START ===');
+    console.log('=== HANDWRITING FEATURE EXTRACTION v7.0 START ===');
     console.log('Student details ID:', student_details_id);
     console.log('Image URL:', image_url);
 
@@ -306,7 +322,7 @@ serve(async (req) => {
       : buildConsensusProfile(extractedProfiles);
 
     // Add metadata
-    handwritingProfile.version = '6.0-weighted';
+    handwritingProfile.version = '7.0-masterpiece-weighted';
     handwritingProfile.trained_at = new Date().toISOString();
     handwritingProfile.reference_image_url = image_url;
 
@@ -329,12 +345,12 @@ serve(async (req) => {
       throw new Error('Failed to save handwriting profile');
     }
 
-    console.log('=== HANDWRITING FEATURE EXTRACTION v6.0 COMPLETE ===');
+    console.log('=== HANDWRITING FEATURE EXTRACTION v7.0 COMPLETE ===');
 
     return new Response(JSON.stringify({
       success: true,
-      message: 'Handwriting profile created successfully with strict enum validation',
-      profile_version: '6.0-weighted',
+      message: 'Handwriting profile created successfully with v7.0 strict enum validation',
+      profile_version: '7.0-masterpiece-weighted',
       features_validated: true,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
