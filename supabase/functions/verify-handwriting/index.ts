@@ -38,17 +38,21 @@ const VALID_ENUMS: Record<string, string[]> = {
   baseline: ['straight', 'wavy', 'variable'],
   height_ratio: ['short', 'moderate', 'tall'],
   writing_style: ['cursive', 'print', 'mixed'],
+  connectivity: ['connected', 'semi_connected', 'disconnected'],
+  line_stability: ['straight', 'rising', 'descending', 'erratic'],
   letter_shape: ['rounded', 'angular', 'looped', 'open', 'closed', 'simple', 'mixed'],
 };
 
 interface HandwritingProfile {
-  slant: "left_lean" | "right_lean" | "upright";
-  stroke_weight: "thin" | "medium" | "thick";
-  letter_spacing: "tight" | "normal" | "wide";
-  word_spacing: "tight" | "normal" | "wide";
-  baseline: "straight" | "wavy" | "variable";
-  height_ratio: "short" | "moderate" | "tall";
-  writing_style: "cursive" | "print" | "mixed";
+  slant: string;
+  stroke_weight: string;
+  letter_spacing: string;
+  word_spacing: string;
+  baseline: string;
+  height_ratio: string;
+  writing_style: string;
+  connectivity?: string;
+  line_stability?: string;
   letter_formations: {
     a: string;
     e: string;
@@ -62,31 +66,31 @@ interface HandwritingProfile {
 
 // ==================== NORMALIZATION (backward compat for old profiles) ====================
 
-const SLANT_MAP: Record<string, HandwritingProfile["slant"]> = {
+const SLANT_MAP: Record<string, string> = {
   "left": "left_lean", "left_lean": "left_lean", "left lean": "left_lean", "leftward": "left_lean",
   "right": "right_lean", "right_lean": "right_lean", "right lean": "right_lean", "rightward": "right_lean",
   "vertical": "upright", "upright": "upright", "straight": "upright", "none": "upright",
 };
 
-const WEIGHT_MAP: Record<string, HandwritingProfile["stroke_weight"]> = {
+const WEIGHT_MAP: Record<string, string> = {
   "thin": "thin", "light": "thin", "fine": "thin",
   "medium": "medium", "moderate": "medium", "normal": "medium", "average": "medium",
   "thick": "thick", "heavy": "thick", "bold": "thick",
 };
 
-const SPACING_MAP: Record<string, "tight" | "normal" | "wide"> = {
+const SPACING_MAP: Record<string, string> = {
   "tight": "tight", "cramped": "tight", "narrow": "tight", "close": "tight", "compressed": "tight",
   "normal": "normal", "moderate": "normal", "average": "normal", "regular": "normal",
   "wide": "wide", "broad": "wide", "spacious": "wide", "loose": "wide", "open": "wide",
 };
 
-const BASELINE_MAP: Record<string, HandwritingProfile["baseline"]> = {
+const BASELINE_MAP: Record<string, string> = {
   "straight": "straight", "stable": "straight", "consistent": "straight", "even": "straight", "level": "straight",
   "wavy": "wavy", "undulating": "wavy", "irregular": "wavy",
   "variable": "variable", "ascending": "variable", "descending": "variable", "varied": "variable", "inconsistent": "variable", "drifting": "variable",
 };
 
-const HEIGHT_MAP: Record<string, HandwritingProfile["height_ratio"]> = {
+const HEIGHT_MAP: Record<string, string> = {
   "short": "short", "small": "short", "compact": "short", "low": "short",
   "moderate": "moderate", "medium": "moderate", "average": "moderate", "normal": "moderate",
   "tall": "tall", "large": "tall", "extended": "tall",
@@ -94,15 +98,26 @@ const HEIGHT_MAP: Record<string, HandwritingProfile["height_ratio"]> = {
   "1.5": "moderate", "proportional": "moderate", "1.5:1": "moderate",
 };
 
-const STYLE_MAP: Record<string, HandwritingProfile["writing_style"]> = {
+const STYLE_MAP: Record<string, string> = {
   "cursive": "cursive", "connected": "cursive", "script": "cursive", "flowing": "cursive",
   "print": "print", "block": "print", "disconnected": "print", "manuscript": "print",
   "mixed": "mixed", "hybrid": "mixed", "semi-cursive": "mixed", "partial": "mixed",
 };
 
-type LetterShape = "rounded" | "angular" | "looped" | "open" | "closed" | "simple" | "mixed";
+const CONNECTIVITY_MAP: Record<string, string> = {
+  "connected": "connected", "flowing": "connected", "joined": "connected",
+  "semi_connected": "semi_connected", "semi-connected": "semi_connected", "partial": "semi_connected",
+  "disconnected": "disconnected", "separate": "disconnected", "isolated": "disconnected",
+};
 
-const LETTER_SHAPE_MAP: Record<string, LetterShape> = {
+const LINE_STABILITY_MAP: Record<string, string> = {
+  "straight": "straight", "stable": "straight", "level": "straight",
+  "rising": "rising", "ascending": "rising", "upward": "rising",
+  "descending": "descending", "falling": "descending", "downward": "descending",
+  "erratic": "erratic", "inconsistent": "erratic", "varied": "erratic",
+};
+
+const LETTER_SHAPE_MAP: Record<string, string> = {
   "rounded": "rounded", "round": "rounded", "oval": "rounded", "circular": "rounded", "curved": "rounded",
   "angular": "angular", "sharp": "angular", "pointed": "angular",
   "looped": "looped", "loop": "looped", "loopy": "looped",
@@ -112,34 +127,27 @@ const LETTER_SHAPE_MAP: Record<string, LetterShape> = {
   "mixed": "mixed", "hybrid": "mixed", "varied": "mixed",
 };
 
-function normalizeLetterShape(description: string | undefined | null): LetterShape {
+function normalizeLetterShape(description: string | undefined | null): string {
   if (!description || description === "unknown") return "simple";
   const lower = description.toLowerCase();
-  // Direct match first
-  if (VALID_ENUMS.letter_shape.includes(lower)) return lower as LetterShape;
+  if (VALID_ENUMS.letter_shape.includes(lower)) return lower;
   for (const [keyword, shape] of Object.entries(LETTER_SHAPE_MAP)) {
     if (lower.includes(keyword)) return shape;
   }
   return "simple";
 }
 
-function mapEnum<T>(value: string | undefined | null, map: Record<string, T>): T | null {
+function mapEnum(value: string | undefined | null, map: Record<string, string>): string | null {
   if (!value) return null;
   const key = String(value).toLowerCase().trim();
-  // Exact match
   if (map[key]) return map[key];
-  // Sort by key length (longest first) for specificity
   const sortedEntries = Object.entries(map).sort((a, b) => b[0].length - a[0].length);
-  // First try word-boundary regex match
   for (const [k, v] of sortedEntries) {
     try {
       const regex = new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
       if (regex.test(key)) return v;
-    } catch {
-      // Fallback for regex issues
-    }
+    } catch { /* ignore */ }
   }
-  // Then try simple includes (catches patterns like "2:1" in longer text)
   for (const [k, v] of sortedEntries) {
     if (key.includes(k)) return v;
   }
@@ -147,7 +155,6 @@ function mapEnum<T>(value: string | undefined | null, map: Record<string, T>): T
 }
 
 function isStrictProfile(raw: any): boolean {
-  // Check if profile already has strict enum values (v6.0+)
   return VALID_ENUMS.slant.includes(raw.slant) &&
     VALID_ENUMS.stroke_weight.includes(raw.stroke_weight) &&
     VALID_ENUMS.letter_spacing.includes(raw.letter_spacing);
@@ -157,7 +164,6 @@ function normalizeProfile(raw: any): HandwritingProfile | null {
   if (!raw || typeof raw !== 'object') return null;
 
   try {
-    // If already strict enum format (v6.0+), use directly
     if (isStrictProfile(raw)) {
       const letter_formations = raw.letter_formations || {};
       return {
@@ -168,6 +174,8 @@ function normalizeProfile(raw: any): HandwritingProfile | null {
         baseline: VALID_ENUMS.baseline.includes(raw.baseline) ? raw.baseline : 'straight',
         height_ratio: VALID_ENUMS.height_ratio.includes(raw.height_ratio) ? raw.height_ratio : 'moderate',
         writing_style: VALID_ENUMS.writing_style.includes(raw.writing_style) ? raw.writing_style : 'mixed',
+        connectivity: VALID_ENUMS.connectivity?.includes(raw.connectivity) ? raw.connectivity : 'semi_connected',
+        line_stability: VALID_ENUMS.line_stability?.includes(raw.line_stability) ? raw.line_stability : 'straight',
         letter_formations: {
           a: VALID_ENUMS.letter_shape.includes(letter_formations.a) ? letter_formations.a : normalizeLetterShape(letter_formations.a),
           e: VALID_ENUMS.letter_shape.includes(letter_formations.e) ? letter_formations.e : normalizeLetterShape(letter_formations.e),
@@ -180,7 +188,7 @@ function normalizeProfile(raw: any): HandwritingProfile | null {
       };
     }
 
-    // Legacy normalization for old profiles (v3.0/v5.0)
+    // Legacy normalization for old profiles (v3.0/v5.0/v6.0)
     const rawSlant = raw.slant_and_baseline?.slant_direction ?? raw.slant_direction ?? raw.slant;
     const rawStroke = raw.stroke_characteristics?.stroke_width ?? raw.stroke_width ?? raw.stroke_weight;
     const rawLetterSpacing = raw.spacing?.letter_spacing ?? raw.letter_spacing;
@@ -215,9 +223,13 @@ function normalizeProfile(raw: any): HandwritingProfile | null {
       s: normalizeLetterShape(rawLetters.s ?? rawLetters.S),
     };
 
+    // Try to normalize connectivity and line_stability from old profiles
+    const connectivity = mapEnum(raw.connectivity, CONNECTIVITY_MAP) ?? 'semi_connected';
+    const line_stability = mapEnum(raw.line_stability, LINE_STABILITY_MAP) ?? 'straight';
+
     const confidence_level = typeof rawConfidence === 'number' ? Math.max(0, Math.min(1, rawConfidence)) : 0.5;
 
-    return { slant, stroke_weight, letter_spacing, word_spacing, baseline, height_ratio, writing_style, letter_formations, confidence_level };
+    return { slant, stroke_weight, letter_spacing, word_spacing, baseline, height_ratio, writing_style, connectivity, line_stability, letter_formations, confidence_level };
   } catch (err) {
     console.error('normalizeProfile error:', err);
     return null;
@@ -237,42 +249,52 @@ CRITICAL RULES:
 FEATURE EXTRACTION INSTRUCTIONS:
 
 **1. SLANT** — Measure vertical stroke angle relative to baseline
-- If strokes lean noticeably left: return EXACTLY "left_lean"
-- If strokes lean noticeably right: return EXACTLY "right_lean"
-- If strokes are vertical or nearly vertical: return EXACTLY "upright"
-Decision rule: Estimate average angle. <80° = left_lean, 80-100° = upright, >100° = right_lean
+- If strokes lean noticeably left (angle < 85°): return EXACTLY "left_lean"
+- If strokes lean noticeably right (angle > 95°): return EXACTLY "right_lean"
+- If strokes are vertical or nearly vertical (85-95°): return EXACTLY "upright"
 
 **2. STROKE_WEIGHT** — Observe line thickness
-- If lines are thin and light: return EXACTLY "thin"
-- If lines are thick and heavy: return EXACTLY "thick"
-- Otherwise: return EXACTLY "medium"
+- If lines are noticeably thinner than standard ballpoint pen: return EXACTLY "thin"
+- If lines are noticeably thicker than standard ballpoint pen: return EXACTLY "thick"
+- If lines are standard thickness: return EXACTLY "medium"
 
-**3. LETTER_SPACING** — Measure space between letters within words
-- If letters touch or nearly touch: return EXACTLY "tight"
-- If letters have large gaps: return EXACTLY "wide"
-- Otherwise: return EXACTLY "normal"
+**3. LETTER_SPACING** — Measure horizontal space between letters within words
+- If letters touch or nearly touch (< 2mm gap): return EXACTLY "tight"
+- If letters have large gaps (> 5mm): return EXACTLY "wide"
+- If spacing is standard (2-5mm): return EXACTLY "normal"
 
-**4. WORD_SPACING** — Measure space between words
-- If word gaps are narrow: return EXACTLY "tight"
-- If word gaps are large: return EXACTLY "wide"
-- Otherwise: return EXACTLY "normal"
+**4. WORD_SPACING** — Measure horizontal space between words
+- If word gaps are narrow (< 8mm): return EXACTLY "tight"
+- If word gaps are large (> 15mm): return EXACTLY "wide"
+- If spacing is standard (8-15mm): return EXACTLY "normal"
 
-**5. BASELINE** — Observe line alignment
+**5. BASELINE** — Observe whether writing sits on a straight horizontal line
 - If writing follows a straight horizontal line: return EXACTLY "straight"
-- If writing curves or waves: return EXACTLY "wavy"
-- If baseline is inconsistent: return EXACTLY "variable"
+- If writing curves or waves consistently: return EXACTLY "wavy"
+- If baseline is inconsistent or erratic: return EXACTLY "variable"
 
-**6. HEIGHT_RATIO** — Compare uppercase to lowercase heights
+**6. HEIGHT_RATIO** — Compare the height of uppercase to lowercase letters
 - If uppercase is 2x or taller than lowercase: return EXACTLY "tall"
-- If uppercase is 1.3-1.7x lowercase: return EXACTLY "moderate"
-- If uppercase barely taller: return EXACTLY "short"
+- If uppercase is 1.3-1.7x the height of lowercase: return EXACTLY "moderate"
+- If uppercase is barely taller than lowercase: return EXACTLY "short"
 
-**7. WRITING_STYLE** — Identify connection pattern
+**7. WRITING_STYLE** — Identify the connection pattern between letters
 - If most letters connect in flowing cursive: return EXACTLY "cursive"
-- If letters are separated: return EXACTLY "print"
+- If letters are clearly separated (print): return EXACTLY "print"
 - If partially connected: return EXACTLY "mixed"
 
-**8. LETTER_FORMATIONS** — For each letter (a, e, g, r, t, s), classify shape:
+**8. CONNECTIVITY** — Measure how strokes connect between letters
+- If strokes flow continuously between most letters: return EXACTLY "connected"
+- If some letters connect, some don't: return EXACTLY "semi_connected"
+- If letters are clearly isolated: return EXACTLY "disconnected"
+
+**9. LINE_STABILITY** — Observe the trend of baseline across the page
+- If baseline maintains straight horizontal: return EXACTLY "straight"
+- If baseline trends upward across the page: return EXACTLY "rising"
+- If baseline trends downward: return EXACTLY "descending"
+- If baseline varies inconsistently: return EXACTLY "erratic"
+
+**10. LETTER_FORMATIONS** — For each letter (a, e, g, r, t, s), classify shape:
 - Smooth curves dominant: return EXACTLY "rounded"
 - Sharp angles dominant: return EXACTLY "angular"
 - Has decorative loops: return EXACTLY "looped"
@@ -281,20 +303,22 @@ Decision rule: Estimate average angle. <80° = left_lean, 80-100° = upright, >1
 - Plain/simple form: return EXACTLY "simple"
 - Mixed characteristics: return EXACTLY "mixed"
 
-**9. IS_HANDWRITTEN** — true if handwritten, false if typed/printed
+**11. IS_HANDWRITTEN** — true if handwritten, false if typed/printed
 
-**10. CONFIDENCE_LEVEL** — 0.0 to 1.0 based on image quality
+**12. CONFIDENCE_LEVEL** — 0.0 to 1.0 based on image quality
 
 REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
 
 {
-  "slant": "left_lean",
+  "slant": "right_lean",
   "stroke_weight": "medium",
   "letter_spacing": "normal",
   "word_spacing": "normal",
   "baseline": "straight",
   "height_ratio": "moderate",
-  "writing_style": "mixed",
+  "writing_style": "print",
+  "connectivity": "semi_connected",
+  "line_stability": "straight",
   "letter_formations": {
     "a": "rounded",
     "e": "open",
@@ -313,12 +337,10 @@ const EXTRACTION_ATTEMPTS = 3;
 
 function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
   if (values.length === 0) return fallback;
-
   const counts = new Map<T, number>();
   for (const value of values) {
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
-
   let bestValue = fallback;
   let bestCount = -1;
   for (const [value, count] of counts.entries()) {
@@ -327,13 +349,11 @@ function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
       bestCount = count;
     }
   }
-
   return bestValue;
 }
 
 function buildConsensusProfile(profiles: HandwritingProfile[]): HandwritingProfile {
   const base = profiles[0];
-
   return {
     slant: pickMostFrequent(profiles.map((p) => p.slant), base.slant),
     stroke_weight: pickMostFrequent(profiles.map((p) => p.stroke_weight), base.stroke_weight),
@@ -342,6 +362,8 @@ function buildConsensusProfile(profiles: HandwritingProfile[]): HandwritingProfi
     baseline: pickMostFrequent(profiles.map((p) => p.baseline), base.baseline),
     height_ratio: pickMostFrequent(profiles.map((p) => p.height_ratio), base.height_ratio),
     writing_style: pickMostFrequent(profiles.map((p) => p.writing_style), base.writing_style),
+    connectivity: pickMostFrequent(profiles.map((p) => p.connectivity ?? 'semi_connected'), base.connectivity ?? 'semi_connected'),
+    line_stability: pickMostFrequent(profiles.map((p) => p.line_stability ?? 'straight'), base.line_stability ?? 'straight'),
     letter_formations: {
       a: pickMostFrequent(profiles.map((p) => p.letter_formations.a), base.letter_formations.a),
       e: pickMostFrequent(profiles.map((p) => p.letter_formations.e), base.letter_formations.e),
@@ -449,7 +471,6 @@ async function extractPageFeatures(
     : buildConsensusProfile(successfulProfiles);
 
   console.log(`Page ${pageNumber}: extraction consensus from ${successfulProfiles.length}/${EXTRACTION_ATTEMPTS} attempts`);
-  console.log(`Page ${pageNumber} profile:`, JSON.stringify(profile));
 
   return { profile, is_handwritten: true };
 }
@@ -462,7 +483,10 @@ interface WeightedComparisonResult {
   confidence_level: number;
   key_observations: string[];
   rare_feature_matches: number;
+  common_feature_matches: number;
   evidence_strength: string;
+  threshold_used: number;
+  weighted_breakdown: any;
 }
 
 function compareProfilesWeighted(
@@ -475,6 +499,8 @@ function compareProfilesWeighted(
   const matches: string[] = [];
   const differences: string[] = [];
   let rareMatchCount = 0;
+  let commonMatchCount = 0;
+  const breakdown: any = {};
 
   const getWeight = (category: string, value: string): number => {
     const key = `${category}:${value}`;
@@ -483,57 +509,86 @@ function compareProfilesWeighted(
 
   const compareFeature = (
     category: string,
-    refValue: string,
-    subValue: string,
+    refValue: string | undefined,
+    subValue: string | undefined,
     maxPoints: number,
     featureName: string
   ): void => {
+    if (!refValue || !subValue) {
+      // Skip features not present in older profiles
+      return;
+    }
     const weight = getWeight(category, refValue);
     const weightedMaxPoints = maxPoints * weight;
     maxWeightedScore += weightedMaxPoints;
 
     if (refValue !== subValue) {
       differences.push(`${featureName} differs (${refValue} vs ${subValue})`);
+      breakdown[category] = { matched: false, reference: refValue, submission: subValue, points: 0, max_points: maxPoints, weight };
       return;
     }
 
     matchedWeightedScore += weightedMaxPoints;
 
-    if (weight >= 0.7) {
+    if (weight >= 0.70) {
       rareMatchCount++;
-      matches.push(`${featureName}: ${refValue} [RARE, +${weightedMaxPoints.toFixed(1)}pts]`);
+      matches.push(`${featureName}: ${refValue} [RARE +${weightedMaxPoints.toFixed(1)}pts, w=${weight.toFixed(2)}]`);
     } else {
-      matches.push(`${featureName}: ${refValue} [+${weightedMaxPoints.toFixed(1)}pts]`);
+      commonMatchCount++;
+      matches.push(`${featureName}: ${refValue} [+${weightedMaxPoints.toFixed(1)}pts, w=${weight.toFixed(2)}]`);
     }
+    breakdown[category] = { matched: true, value: refValue, weight, points: weightedMaxPoints, max_points: maxPoints };
   };
 
-  compareFeature('slant', ref.slant, sub.slant, 15, 'Slant');
-  compareFeature('stroke_weight', ref.stroke_weight, sub.stroke_weight, 10, 'Stroke weight');
-  compareFeature('letter_spacing', ref.letter_spacing, sub.letter_spacing, 15, 'Letter spacing');
-  compareFeature('word_spacing', ref.word_spacing, sub.word_spacing, 10, 'Word spacing');
-  compareFeature('baseline', ref.baseline, sub.baseline, 10, 'Baseline');
-  compareFeature('height_ratio', ref.height_ratio, sub.height_ratio, 10, 'Height ratio');
+  // Compare all main features
+  compareFeature('slant', ref.slant, sub.slant, 12, 'Slant');
+  compareFeature('stroke_weight', ref.stroke_weight, sub.stroke_weight, 8, 'Stroke weight');
+  compareFeature('letter_spacing', ref.letter_spacing, sub.letter_spacing, 10, 'Letter spacing');
+  compareFeature('word_spacing', ref.word_spacing, sub.word_spacing, 8, 'Word spacing');
+  compareFeature('baseline', ref.baseline, sub.baseline, 8, 'Baseline');
+  compareFeature('height_ratio', ref.height_ratio, sub.height_ratio, 8, 'Height ratio');
   compareFeature('writing_style', ref.writing_style, sub.writing_style, 10, 'Writing style');
+  compareFeature('connectivity', ref.connectivity, sub.connectivity, 8, 'Connectivity');
+  compareFeature('line_stability', ref.line_stability, sub.line_stability, 6, 'Line stability');
 
-  // Letter formations (30 points total, 5 per letter), weighted by rarity
+  // Letter formations (30 points total, 5 per letter)
   const letters = ['a', 'e', 'g', 'r', 't', 's'] as const;
+  const letterBreakdown: any = {};
   for (const letter of letters) {
     const refShape = ref.letter_formations[letter];
     const subShape = sub.letter_formations[letter];
 
     if (!refShape) continue;
-
     if (!subShape) {
       const missingWeight = getWeight('letter_shape', refShape);
       maxWeightedScore += 5 * missingWeight;
       differences.push(`Letter ${letter} missing in submission (${refShape})`);
+      letterBreakdown[letter] = { matched: false, reference: refShape, submission: subShape, points: 0, max_points: 5 };
       continue;
     }
 
-    compareFeature('letter_shape', refShape, subShape, 5, `Letter ${letter}`);
-  }
+    const weight = getWeight('letter_shape', refShape);
+    const weightedMaxPoints = 5 * weight;
+    maxWeightedScore += weightedMaxPoints;
 
-  // Normalize weighted score to 0-100 so thresholds remain meaningful
+    if (refShape === subShape) {
+      matchedWeightedScore += weightedMaxPoints;
+      if (weight >= 0.70) {
+        rareMatchCount++;
+        matches.push(`Letter ${letter}: ${refShape} [RARE +${weightedMaxPoints.toFixed(1)}pts]`);
+      } else {
+        commonMatchCount++;
+        matches.push(`Letter ${letter}: ${refShape} [+${weightedMaxPoints.toFixed(1)}pts]`);
+      }
+      letterBreakdown[letter] = { matched: true, shape: refShape, weight, points: weightedMaxPoints, max_points: 5 };
+    } else {
+      differences.push(`Letter ${letter}: ${refShape} vs ${subShape}`);
+      letterBreakdown[letter] = { matched: false, reference: refShape, submission: subShape, points: 0, max_points: 5, weight };
+    }
+  }
+  breakdown.letter_formations = letterBreakdown;
+
+  // Normalize to 0-100
   const normalizedScore = maxWeightedScore > 0
     ? (matchedWeightedScore / maxWeightedScore) * 100
     : 0;
@@ -549,22 +604,23 @@ function compareProfilesWeighted(
   let threshold = 70;
   threshold -= rareMatchCount * 3;
   if (avgConfidence < 0.7) threshold += 5;
+  if (commonMatchCount > 5 && rareMatchCount === 0) threshold += 5;
   threshold = Math.max(60, Math.min(threshold, 80));
 
   let evidenceStrength = 'weak';
-  if (rareMatchCount >= 4) evidenceStrength = 'very_strong';
-  else if (rareMatchCount >= 2) evidenceStrength = 'strong';
+  if (rareMatchCount >= 5) evidenceStrength = 'very_strong';
+  else if (rareMatchCount >= 3) evidenceStrength = 'strong';
   else if (rareMatchCount >= 1) evidenceStrength = 'moderate';
 
-  const topMatches = matches.slice(0, 6);
-  const topDifferences = differences.slice(0, 3);
+  const topMatches = matches.slice(0, 8);
+  const topDifferences = differences.slice(0, 4);
   const observations = [
     ...topMatches,
     ...topDifferences,
-    `[Weighted: ${matchedWeightedScore.toFixed(1)}/${maxWeightedScore.toFixed(1)}, Norm: ${normalizedScore.toFixed(1)}, Conf: ${(avgConfidence * 100).toFixed(0)}%, Final: ${finalScore}, Thresh: ${threshold}, Rare: ${rareMatchCount}]`
+    `[Score: ${finalScore}/100, Raw: ${normalizedScore.toFixed(1)}, Conf: ${(avgConfidence * 100).toFixed(0)}%, Thresh: ${threshold}, Rare: ${rareMatchCount}, Common: ${commonMatchCount}, Evidence: ${evidenceStrength}]`
   ];
 
-  console.log(`Weighted comparison: matched=${matchedWeightedScore.toFixed(1)}, max=${maxWeightedScore.toFixed(1)}, norm=${normalizedScore.toFixed(1)}, final=${finalScore}, threshold=${threshold}, rare=${rareMatchCount}, evidence=${evidenceStrength}`);
+  console.log(`Weighted comparison: final=${finalScore}, threshold=${threshold}, rare=${rareMatchCount}, common=${commonMatchCount}, evidence=${evidenceStrength}`);
 
   return {
     similarity_score: finalScore,
@@ -572,76 +628,53 @@ function compareProfilesWeighted(
     confidence_level: avgConfidence,
     key_observations: observations,
     rare_feature_matches: rareMatchCount,
+    common_feature_matches: commonMatchCount,
     evidence_strength: evidenceStrength,
+    threshold_used: threshold,
+    weighted_breakdown: breakdown,
   };
 }
 
-// ==================== UNCHANGED UTILITIES ====================
+// ==================== UTILITIES ====================
 
 async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64: string; size: number }> {
   console.log('Fetching image:', url);
   
   if (!url.startsWith('http')) {
-    console.log('Generating signed URL for storage path:', url);
     const { data: signedData, error: signedError } = await supabase.storage
       .from('uploads')
       .createSignedUrl(url.split('?')[0], 300);
-    
-    if (signedError) {
-      console.error('Error creating signed URL:', signedError);
-      throw new Error(`Failed to access file: ${signedError.message}`);
-    }
+    if (signedError) throw new Error(`Failed to access file: ${signedError.message}`);
     url = signedData.signedUrl;
-    console.log('Using signed URL for storage path');
   } else {
     const uploadsBucketMatch = url.match(/\/storage\/v1\/object\/public\/uploads\/(.+?)(\?.*)?$/);
     if (uploadsBucketMatch) {
       const filePath = uploadsBucketMatch[1];
-      console.log('Generating signed URL for private bucket, path:', filePath);
-      
       const { data: signedData, error: signedError } = await supabase.storage
         .from('uploads')
         .createSignedUrl(filePath, 300);
-      
-      if (signedError) {
-        console.error('Error creating signed URL:', signedError);
-        throw new Error(`Failed to access file: ${signedError.message}`);
-      }
-      
+      if (signedError) throw new Error(`Failed to access file: ${signedError.message}`);
       url = signedData.signedUrl;
-      console.log('Using signed URL');
     }
   }
   
   const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
   const arrayBuffer = await response.arrayBuffer();
   const base64 = encode(arrayBuffer);
   return { base64, size: arrayBuffer.byteLength };
 }
 
 function determineRiskLevel(score: number, hasCriticalFlag: boolean): string {
-  if (hasCriticalFlag || score < VERIFICATION_THRESHOLDS.MANUAL_REVIEW) {
-    return 'high';
-  }
-  if (score < VERIFICATION_THRESHOLDS.VERIFIED) {
-    return 'medium';
-  }
+  if (hasCriticalFlag || score < VERIFICATION_THRESHOLDS.MANUAL_REVIEW) return 'high';
+  if (score < VERIFICATION_THRESHOLDS.VERIFIED) return 'medium';
   return 'low';
 }
 
 function determineStatus(score: number, hasCriticalFlag: boolean, hasTypedContent: boolean): string {
-  if (hasTypedContent) {
-    return 'needs_manual_review';
-  }
-  if (hasCriticalFlag || score < VERIFICATION_THRESHOLDS.MANUAL_REVIEW) {
-    return 'needs_manual_review';
-  }
-  if (score < VERIFICATION_THRESHOLDS.VERIFIED) {
-    return 'needs_manual_review';
-  }
+  if (hasTypedContent) return 'needs_manual_review';
+  if (hasCriticalFlag || score < VERIFICATION_THRESHOLDS.MANUAL_REVIEW) return 'needs_manual_review';
+  if (score < VERIFICATION_THRESHOLDS.VERIFIED) return 'needs_manual_review';
   return 'verified';
 }
 
@@ -656,64 +689,16 @@ interface FallbackResult {
 }
 
 function getFallbackResult(errorType: ErrorType): FallbackResult {
-  switch (errorType) {
-    case 'no_profile':
-      return {
-        score: 50,
-        risk_level: 'medium',
-        status: 'needs_manual_review',
-        error_type: 'no_profile',
-        message: 'No handwriting profile found. Please upload your handwriting sample first.'
-      };
-    case 'file_too_large':
-      return {
-        score: 50,
-        risk_level: 'medium',
-        status: 'needs_manual_review',
-        error_type: 'file_too_large',
-        message: 'Image too large for automatic verification. Manual review required.'
-      };
-    case 'typed_content_detected':
-      return {
-        score: 0,
-        risk_level: 'high',
-        status: 'needs_manual_review',
-        error_type: 'typed_content_detected',
-        message: 'Typed or printed content detected. Only handwritten pages are accepted.'
-      };
-    case 'rate_limit':
-      return {
-        score: 50,
-        risk_level: 'medium',
-        status: 'needs_manual_review',
-        error_type: 'rate_limit',
-        message: 'AI service busy. Your submission will be reviewed manually.'
-      };
-    case 'ai_gateway_error':
-      return {
-        score: 50,
-        risk_level: 'medium',
-        status: 'needs_manual_review',
-        error_type: 'ai_gateway_error',
-        message: 'AI analysis temporarily unavailable. Manual review required.'
-      };
-    case 'parse_error':
-      return {
-        score: 50,
-        risk_level: 'medium',
-        status: 'needs_manual_review',
-        error_type: 'parse_error',
-        message: 'Could not process AI response. Manual review required.'
-      };
-    default:
-      return {
-        score: 50,
-        risk_level: 'medium',
-        status: 'needs_manual_review',
-        error_type: 'unknown',
-        message: 'Verification encountered an issue. Manual review required.'
-      };
-  }
+  const fallbacks: Record<ErrorType, FallbackResult> = {
+    no_profile: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'no_profile', message: 'No handwriting profile found. Please upload your handwriting sample first.' },
+    file_too_large: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'file_too_large', message: 'Image too large for automatic verification. Manual review required.' },
+    typed_content_detected: { score: 0, risk_level: 'high', status: 'needs_manual_review', error_type: 'typed_content_detected', message: 'Typed or printed content detected. Only handwritten pages are accepted.' },
+    rate_limit: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'rate_limit', message: 'AI service busy. Your submission will be reviewed manually.' },
+    ai_gateway_error: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'ai_gateway_error', message: 'AI analysis temporarily unavailable. Manual review required.' },
+    parse_error: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'parse_error', message: 'Could not process AI response. Manual review required.' },
+    unknown: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'unknown', message: 'Verification encountered an issue. Manual review required.' },
+  };
+  return { ...fallbacks[errorType] };
 }
 
 // ==================== MAIN HANDLER ====================
@@ -725,22 +710,17 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { submission_id, file_urls, file_url, student_profile_id, page_count } = body;
+    const { submission_id, file_urls, file_url, student_profile_id } = body;
 
     const imageUrls: string[] = file_urls || (file_url ? [file_url] : []);
 
-    console.log('=== WEIGHTED PROBABILISTIC HANDWRITING VERIFICATION v6.0 START ===');
+    console.log('=== HANDWRITING VERIFICATION v7.0-MASTERPIECE START ===');
     console.log('Submission ID:', submission_id);
     console.log('Image URLs:', imageUrls.length, 'pages');
     console.log('Student Profile ID:', student_profile_id);
 
-    if (imageUrls.length === 0) {
-      throw new Error('No image URLs provided');
-    }
-
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY is not configured');
-    }
+    if (imageUrls.length === 0) throw new Error('No image URLs provided');
+    if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY is not configured');
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -749,9 +729,7 @@ serve(async (req) => {
       .from('feature_statistics')
       .select('feature_category, feature_value, discriminative_weight');
 
-    if (statsError) {
-      console.error('Failed to load feature statistics:', statsError);
-    }
+    if (statsError) console.error('Failed to load feature statistics:', statsError);
 
     const weightMap = new Map<string, number>();
     featureStats?.forEach((stat: any) => {
@@ -793,10 +771,7 @@ serve(async (req) => {
       .eq('profile_id', student_profile_id)
       .single();
 
-    if (studentError) {
-      console.error('Error fetching student details:', studentError);
-      throw new Error('Failed to fetch student details');
-    }
+    if (studentError) throw new Error('Failed to fetch student details');
 
     const handwritingProfile = studentDetails?.handwriting_feature_embedding;
 
@@ -814,7 +789,7 @@ serve(async (req) => {
           status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '6.0-weighted-probabilistic',
+            algorithm_version: '7.0-masterpiece-weighted',
             error_type: fallback.error_type,
             reason: fallback.message,
             page_count: imageUrls.length,
@@ -824,10 +799,7 @@ serve(async (req) => {
         })
         .eq('id', submission_id);
 
-      return new Response(JSON.stringify({
-        success: true,
-        ...fallback
-      }), {
+      return new Response(JSON.stringify({ success: true, ...fallback }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -835,7 +807,7 @@ serve(async (req) => {
     // Normalize the stored reference profile
     const referenceProfile = normalizeProfile(handwritingProfile);
     if (!referenceProfile) {
-      console.error('Failed to normalize reference profile. Raw:', JSON.stringify(handwritingProfile));
+      console.error('Failed to normalize reference profile');
       const fallback = getFallbackResult('no_profile');
       fallback.message = 'Handwriting profile could not be normalized. Please retrain your handwriting sample.';
       
@@ -848,7 +820,7 @@ serve(async (req) => {
           status: fallback.status,
           verified_at: new Date().toISOString(),
           ai_analysis_details: {
-            algorithm_version: '6.0-weighted-probabilistic',
+            algorithm_version: '7.0-masterpiece-weighted',
             error_type: 'parse_error',
             reason: fallback.message,
             page_count: imageUrls.length,
@@ -858,22 +830,21 @@ serve(async (req) => {
         })
         .eq('id', submission_id);
 
-      return new Response(JSON.stringify({
-        success: true,
-        ...fallback
-      }), {
+      return new Response(JSON.stringify({ success: true, ...fallback }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    console.log('Reference profile normalized:', JSON.stringify(referenceProfile));
+    console.log('Reference profile normalized successfully');
 
-    // Process each page: extract features then compare deterministically
+    // Process each page
     const pageResults: PageResult[] = [];
     let hasTypedContent = false;
     let hasDifferentWriter = false;
     let totalRareMatches = 0;
+    let totalCommonMatches = 0;
     let overallEvidenceStrength = 'weak';
+    let lastComparisonResult: WeightedComparisonResult | null = null;
 
     for (let i = 0; i < imageUrls.length; i++) {
       const pageUrl = imageUrls[i];
@@ -883,60 +854,32 @@ serve(async (req) => {
 
       try {
         const { base64: pageBase64, size: pageSize } = await fetchImageAsBase64(pageUrl, supabase);
-        console.log(`Page ${pageNum} size:`, pageSize, 'bytes');
 
-        // Check if image is too large
         if (pageBase64.length > MAX_BASE64_SIZE) {
-          console.log(`Page ${pageNum} too large for AI processing`);
-          pageResults.push({
-            page: pageNum,
-            similarity: 50,
-            same_writer: false,
-            is_handwritten: true,
-            confidence: 'low'
-          });
+          pageResults.push({ page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' });
           continue;
         }
 
         // Stage 1: Extract features from submission page
-        const { profile: submissionProfile, is_handwritten } = await extractPageFeatures(
-          pageNum,
-          pageBase64,
-          LOVABLE_API_KEY
-        );
+        const { profile: submissionProfile, is_handwritten } = await extractPageFeatures(pageNum, pageBase64, LOVABLE_API_KEY);
 
-        // Typed content detection
         if (!is_handwritten) {
-          console.log(`Page ${pageNum}: typed/printed content detected`);
           hasTypedContent = true;
-          pageResults.push({
-            page: pageNum,
-            similarity: 0,
-            same_writer: false,
-            is_handwritten: false,
-            confidence: 'high'
-          });
+          pageResults.push({ page: pageNum, similarity: 0, same_writer: false, is_handwritten: false, confidence: 'high' });
           continue;
         }
 
-        // Extraction failed → fallback
         if (!submissionProfile) {
-          console.log(`Page ${pageNum}: feature extraction failed, using fallback`);
-          pageResults.push({
-            page: pageNum,
-            similarity: 50,
-            same_writer: false,
-            is_handwritten: true,
-            confidence: 'low'
-          });
+          pageResults.push({ page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' });
           continue;
         }
 
         // Stage 2: Weighted deterministic comparison
         const comparison = compareProfilesWeighted(referenceProfile, submissionProfile, weightMap);
-        console.log(`Page ${pageNum} weighted result:`, JSON.stringify(comparison));
+        lastComparisonResult = comparison;
 
         totalRareMatches += comparison.rare_feature_matches;
+        totalCommonMatches += comparison.common_feature_matches;
         if (comparison.evidence_strength === 'very_strong' || comparison.evidence_strength === 'strong') {
           overallEvidenceStrength = comparison.evidence_strength;
         }
@@ -944,42 +887,27 @@ serve(async (req) => {
         const confidenceStr = comparison.confidence_level >= 0.7 ? 'high' 
           : comparison.confidence_level >= 0.4 ? 'medium' : 'low';
 
-        const pageResult: PageResult = {
+        pageResults.push({
           page: pageNum,
           similarity: comparison.similarity_score,
           same_writer: comparison.same_writer,
           is_handwritten: true,
           confidence: confidenceStr,
-        };
+        });
 
-        pageResults.push(pageResult);
-
-        if (!pageResult.same_writer) {
-          hasDifferentWriter = true;
-        }
-
-        console.log(`Page ${pageNum} result:`, pageResult);
+        if (!comparison.same_writer) hasDifferentWriter = true;
 
       } catch (pageError: any) {
         console.error(`Error processing page ${pageNum}:`, pageError);
-        pageResults.push({
-          page: pageNum,
-          similarity: 50,
-          same_writer: false,
-          is_handwritten: true,
-          confidence: 'low'
-        });
+        pageResults.push({ page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' });
       }
     }
 
-    // Conservative aggregation: use MINIMUM similarity across all pages
+    // Conservative aggregation
     const similarities = pageResults.map(p => p.similarity);
     const overallSimilarity = Math.min(...similarities);
-    
-    // All pages must be from same writer for overall = true
     const overallSameWriter = pageResults.every(p => p.same_writer) && !hasDifferentWriter;
     
-    // Confidence is lowest if any page has issues
     const confidenceLevels = pageResults.map(p => p.confidence);
     const overallConfidence = confidenceLevels.includes('low') ? 'low' 
       : confidenceLevels.includes('medium') ? 'medium' 
@@ -988,31 +916,53 @@ serve(async (req) => {
 
     // Determine final status
     const hasCriticalFlag = hasDifferentWriter || hasTypedContent;
-    const riskLevel = determineRiskLevel(overallSimilarity, hasCriticalFlag);
-    const status = determineStatus(overallSimilarity, hasCriticalFlag, hasTypedContent);
+    let riskLevel = determineRiskLevel(overallSimilarity, hasCriticalFlag);
+    let status = determineStatus(overallSimilarity, hasCriticalFlag, hasTypedContent);
 
-    // Build final reasoning
+    // Build reasoning
     let finalReasoning = '';
-    if (hasTypedContent) {
-      finalReasoning = 'One or more pages contain typed/printed content instead of handwriting. ';
-    }
-    if (hasDifferentWriter) {
-      finalReasoning += 'Handwriting inconsistency detected across pages. ';
-    }
+    if (hasTypedContent) finalReasoning = 'One or more pages contain typed/printed content. ';
+    if (hasDifferentWriter) finalReasoning += 'Handwriting inconsistency detected. ';
     if (overallSameWriter && !hasTypedContent) {
       finalReasoning = `All ${pageResults.length} pages verified as same writer with ${overallSimilarity}% similarity.`;
     } else if (!hasTypedContent && !hasDifferentWriter) {
       finalReasoning = `Verification completed with ${overallSimilarity}% overall similarity across ${pageResults.length} pages.`;
     }
 
+    // ==================== ANTI-SPOOFING CHECK ====================
+    let spoofingRiskLevel = 'none';
+    try {
+      console.log('Checking for spoofing patterns...');
+      const submissionProfileSnapshot = lastComparisonResult?.weighted_breakdown || {};
+      
+      const { data: spoofingRisk, error: spoofingError } = await supabase
+        .rpc('check_spoofing_risk', {
+          p_student_profile_id: student_profile_id,
+          p_current_profile: submissionProfileSnapshot,
+          p_similarity_score: overallSimilarity
+        });
+
+      if (spoofingError) {
+        console.error('Spoofing check failed:', spoofingError);
+      } else if (spoofingRisk) {
+        spoofingRiskLevel = spoofingRisk;
+        console.log(`Spoofing risk level: ${spoofingRiskLevel}`);
+
+        if (spoofingRiskLevel === 'high') {
+          console.warn(`⚠️ HIGH SPOOFING RISK for student ${student_profile_id}`);
+          status = 'needs_manual_review';
+          riskLevel = 'high';
+          finalReasoning = 'WARNING: Potential AI-generated submission detected (multiple perfect matches). ' + finalReasoning;
+        } else if (spoofingRiskLevel === 'medium') {
+          console.log('⚠️ Medium spoofing risk - flagging for review');
+        }
+      }
+    } catch (error) {
+      console.error('Error in spoofing detection:', error);
+    }
+
     console.log('=== AGGREGATION RESULTS ===');
-    console.log('Overall Similarity:', overallSimilarity);
-    console.log('Same Writer:', overallSameWriter);
-    console.log('Has Typed Content:', hasTypedContent);
-    console.log('Risk Level:', riskLevel);
-    console.log('Status:', status);
-    console.log('Total Rare Matches:', totalRareMatches);
-    console.log('Evidence Strength:', overallEvidenceStrength);
+    console.log('Overall Similarity:', overallSimilarity, 'Status:', status, 'Risk:', riskLevel, 'Spoofing:', spoofingRiskLevel);
 
     // Update submission with results
     const { error: updateError } = await supabase
@@ -1024,7 +974,7 @@ serve(async (req) => {
         status: status,
         verified_at: new Date().toISOString(),
         ai_analysis_details: {
-          algorithm_version: '6.0-weighted-probabilistic',
+          algorithm_version: '7.0-masterpiece-weighted',
           page_count: pageResults.length,
           overall_similarity_score: overallSimilarity,
           same_writer: overallSameWriter,
@@ -1035,26 +985,29 @@ serve(async (req) => {
           page_results: pageResults,
           final_reasoning: finalReasoning,
           rare_feature_matches: totalRareMatches,
+          common_feature_matches: totalCommonMatches,
           evidence_strength: overallEvidenceStrength,
+          threshold_used: lastComparisonResult?.threshold_used ?? 70,
+          spoofing_risk: spoofingRiskLevel,
+          weighted_breakdown: lastComparisonResult?.weighted_breakdown,
           critical_flags: [
             ...(hasTypedContent ? ['typed_content_detected'] : []),
-            ...(hasDifferentWriter ? ['different_writer_detected'] : [])
+            ...(hasDifferentWriter ? ['different_writer_detected'] : []),
+            ...(spoofingRiskLevel === 'high' ? ['spoofing_detected'] : []),
           ]
         },
         page_verification_results: pageResults,
         ai_flagged_sections: [
           ...(hasTypedContent ? ['typed_content_detected'] : []),
-          ...(hasDifferentWriter ? ['different_writer_detected'] : [])
+          ...(hasDifferentWriter ? ['different_writer_detected'] : []),
+          ...(spoofingRiskLevel === 'high' ? ['potential_spoofing'] : []),
         ],
       })
       .eq('id', submission_id);
 
-    if (updateError) {
-      console.error('Error updating submission:', updateError);
-      throw updateError;
-    }
+    if (updateError) throw updateError;
 
-    console.log('=== VERIFICATION COMPLETE ===');
+    console.log('=== VERIFICATION v7.0-MASTERPIECE COMPLETE ===');
 
     return new Response(JSON.stringify({
       success: true,
@@ -1064,6 +1017,7 @@ serve(async (req) => {
       status: status,
       page_count: pageResults.length,
       page_results: pageResults,
+      spoofing_risk: spoofingRiskLevel,
       message: finalReasoning
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

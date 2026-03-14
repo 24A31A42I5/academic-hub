@@ -250,6 +250,47 @@ export type Database = {
           },
         ]
       }
+      submission_consistency: {
+        Row: {
+          avg_variation_score: number | null
+          created_at: string | null
+          last_checked_at: string | null
+          last_profile_snapshot: Json | null
+          perfect_match_count: number | null
+          spoofing_risk_level: string | null
+          student_profile_id: string
+          submission_count: number | null
+        }
+        Insert: {
+          avg_variation_score?: number | null
+          created_at?: string | null
+          last_checked_at?: string | null
+          last_profile_snapshot?: Json | null
+          perfect_match_count?: number | null
+          spoofing_risk_level?: string | null
+          student_profile_id: string
+          submission_count?: number | null
+        }
+        Update: {
+          avg_variation_score?: number | null
+          created_at?: string | null
+          last_checked_at?: string | null
+          last_profile_snapshot?: Json | null
+          perfect_match_count?: number | null
+          spoofing_risk_level?: string | null
+          student_profile_id?: string
+          submission_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "submission_consistency_student_profile_id_fkey"
+            columns: ["student_profile_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       submissions: {
         Row: {
           ai_analysis_details: Json | null
@@ -354,6 +395,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_spoofing_risk: {
+        Args: {
+          p_current_profile: Json
+          p_similarity_score: number
+          p_student_profile_id: string
+        }
+        Returns: string
+      }
       faculty_can_view_profile: {
         Args: { _faculty_user_id: string; _profile_id: string }
         Returns: boolean

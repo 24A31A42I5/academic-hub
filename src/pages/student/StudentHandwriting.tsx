@@ -330,6 +330,8 @@ const StudentHandwriting = () => {
 
   const hasHandwriting = !!studentDetails?.handwriting_url;
   const hasFeatures = !!studentDetails?.handwriting_feature_embedding;
+  const profileVersion = (studentDetails?.handwriting_feature_embedding as any)?.version;
+  const profileNeedsUpdate = hasFeatures && profileVersion && !profileVersion.startsWith('7.');
 
   return (
     <DashboardLayout title="My Handwriting" role="student" navItems={navItems}>
@@ -340,6 +342,31 @@ const StudentHandwriting = () => {
       )}
 
       <div className="max-w-3xl mx-auto">
+        {/* Profile Upgrade Banner */}
+        {profileNeedsUpdate && (
+          <Alert className="mb-6 border-warning/50 bg-warning/10">
+            <AlertTriangle className="h-5 w-5 text-warning" />
+            <AlertTitle className="text-warning">System Upgrade: Profile Retrain Required</AlertTitle>
+            <AlertDescription className="mt-2 text-muted-foreground">
+              Our verification system has been upgraded to v7.0 with improved accuracy and anti-spoofing detection.
+              Please retrain your handwriting profile for best results.
+              <Button 
+                onClick={handleRetrainFeatures} 
+                variant="outline" 
+                size="sm"
+                disabled={retraining}
+                className="ml-4"
+              >
+                {retraining ? (
+                  <><Loader2 className="w-4 h-4 animate-spin mr-2" />Retraining...</>
+                ) : (
+                  <><RefreshCw className="w-4 h-4 mr-2" />Retrain Now</>
+                )}
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Warning Alert */}
         <Alert variant="destructive" className="mb-6">
           <AlertTriangle className="h-5 w-5" />
