@@ -344,10 +344,10 @@ const StudentHandwriting = () => {
       <div className="max-w-3xl mx-auto">
         {/* Profile Upgrade Banner */}
         {profileNeedsUpdate && (
-          <Alert className="mb-6 border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
-            <AlertTriangle className="h-5 w-5 text-amber-600" />
-            <AlertTitle className="text-amber-800 dark:text-amber-400">System Upgrade: Profile Retrain Required</AlertTitle>
-            <AlertDescription className="mt-2 text-amber-700 dark:text-amber-300">
+          <Alert className="mb-6 border-warning/50 bg-warning/10">
+            <AlertTriangle className="h-5 w-5 text-warning" />
+            <AlertTitle className="text-warning">System Upgrade: Profile Retrain Required</AlertTitle>
+            <AlertDescription className="mt-2 text-muted-foreground">
               Our verification system has been upgraded to v7.0 with improved accuracy and anti-spoofing detection.
               Please retrain your handwriting profile for best results.
               <Button 
@@ -355,7 +355,7 @@ const StudentHandwriting = () => {
                 variant="outline" 
                 size="sm"
                 disabled={retraining}
-                className="ml-4 border-amber-500 text-amber-700 hover:bg-amber-100"
+                className="ml-4"
               >
                 {retraining ? (
                   <><Loader2 className="w-4 h-4 animate-spin mr-2" />Retraining...</>
