@@ -600,11 +600,12 @@ function compareProfilesWeighted(
   const confidenceAdjusted = normalizedScore * avgConfidence;
   const finalScore = Math.max(0, Math.min(100, Math.round(confidenceAdjusted)));
 
-  // Dynamic threshold
+  // Dynamic threshold based on rare evidence
   let threshold = 70;
   threshold -= rareMatchCount * 3;
   if (avgConfidence < 0.7) threshold += 5;
-  if (commonMatchCount > 5 && rareMatchCount === 0) threshold += 5;
+  // Removed: common-only penalty was causing inconsistent thresholds across pages
+  // of the same submission, penalizing pages where AI happened to miss rare features
   threshold = Math.max(60, Math.min(threshold, 80));
 
   let evidenceStrength = 'weak';
