@@ -991,7 +991,7 @@ serve(async (req) => {
           confidence_level: overallConfidence,
           has_typed_content: hasTypedContent,
           has_different_writer: hasDifferentWriter,
-          aggregation_method: 'conservative_minimum',
+          aggregation_method: 'weighted_average_0.6_avg_0.4_min',
           page_results: pageResults,
           final_reasoning: finalReasoning,
           rare_feature_matches: totalRareMatches,
