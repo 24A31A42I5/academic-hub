@@ -351,8 +351,7 @@ serve(async (req) => {
     console.log(`Built profile consensus from ${extractedProfiles.length}/${EXTRACTION_ATTEMPTS} successful attempts`);
     console.log('Validated handwriting profile:', JSON.stringify(handwritingProfile, null, 2));
 
-    // Create Supabase client and update student_details
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    // Update student_details with new profile
 
     const { error: updateError } = await supabase
       .from('student_details')
