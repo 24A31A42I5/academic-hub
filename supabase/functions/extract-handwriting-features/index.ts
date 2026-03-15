@@ -213,11 +213,12 @@ serve(async (req) => {
   }
 
   try {
-    const { image_url, student_details_id } = await req.json();
+    const { image_url, student_details_id, retrain } = await req.json();
 
     console.log('=== HANDWRITING FEATURE EXTRACTION v7.0 START ===');
     console.log('Student details ID:', student_details_id);
     console.log('Image URL:', image_url);
+    console.log('Retrain mode:', !!retrain);
 
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY is not configured');
@@ -225,6 +226,27 @@ serve(async (req) => {
 
     if (!image_url || !student_details_id) {
       throw new Error('Missing required parameters: image_url and student_details_id');
+    }
+
+    // Create Supabase client early (needed for retrain clearing)
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // If retraining, clear old features first (service_role bypasses RLS trigger)
+    if (retrain) {
+      console.log('Retrain mode: clearing old features...');
+      const { error: clearError } = await supabase
+        .from('student_details')
+        .update({
+          handwriting_feature_embedding: null,
+          handwriting_features_extracted_at: null,
+        })
+        .eq('id', student_details_id);
+
+      if (clearError) {
+        console.error('Failed to clear old features:', clearError);
+        throw new Error('Failed to clear old handwriting features');
+      }
+      console.log('Old features cleared successfully');
     }
 
     // Fetch image as base64
