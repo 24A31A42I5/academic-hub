@@ -600,11 +600,12 @@ function compareProfilesWeighted(
   const confidenceAdjusted = normalizedScore * avgConfidence;
   const finalScore = Math.max(0, Math.min(100, Math.round(confidenceAdjusted)));
 
-  // Dynamic threshold
+  // Dynamic threshold based on rare evidence
   let threshold = 70;
   threshold -= rareMatchCount * 3;
   if (avgConfidence < 0.7) threshold += 5;
-  if (commonMatchCount > 5 && rareMatchCount === 0) threshold += 5;
+  // Removed: common-only penalty was causing inconsistent thresholds across pages
+  // of the same submission, penalizing pages where AI happened to miss rare features
   threshold = Math.max(60, Math.min(threshold, 80));
 
   let evidenceStrength = 'weak';
@@ -903,16 +904,25 @@ serve(async (req) => {
       }
     }
 
-    // Conservative aggregation
+    // Robust multi-page aggregation:
+    // Use weighted average (penalizing outliers) instead of pure minimum
+    // which is too sensitive to per-page extraction noise
     const similarities = pageResults.map(p => p.similarity);
-    const overallSimilarity = Math.min(...similarities);
+    const minSimilarity = Math.min(...similarities);
+    const avgSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
+    
+    // Weighted: 60% average + 40% minimum — balances fairness with conservatism
+    const overallSimilarity = Math.round(avgSimilarity * 0.6 + minSimilarity * 0.4);
     const overallSameWriter = pageResults.every(p => p.same_writer) && !hasDifferentWriter;
     
+    // Use the best threshold across pages (most evidence = fairest threshold)
     const confidenceLevels = pageResults.map(p => p.confidence);
     const overallConfidence = confidenceLevels.includes('low') ? 'low' 
       : confidenceLevels.includes('medium') ? 'medium' 
       : 'high';
     const confidenceScore = overallConfidence === 'high' ? 90 : overallConfidence === 'medium' ? 70 : 50;
+
+    console.log(`Aggregation: avg=${avgSimilarity.toFixed(1)}, min=${minSimilarity}, weighted=${overallSimilarity}`);
 
     // Determine final status
     const hasCriticalFlag = hasDifferentWriter || hasTypedContent;
@@ -981,7 +991,7 @@ serve(async (req) => {
           confidence_level: overallConfidence,
           has_typed_content: hasTypedContent,
           has_different_writer: hasDifferentWriter,
-          aggregation_method: 'conservative_minimum',
+          aggregation_method: 'weighted_average_0.6_avg_0.4_min',
           page_results: pageResults,
           final_reasoning: finalReasoning,
           rare_feature_matches: totalRareMatches,
