@@ -172,7 +172,7 @@ const StudentHandwriting = () => {
       const { error: uploadError } = await supabase.storage
         .from('handwriting-samples')
         .upload(fileName, strippedImage, {
-          cacheControl: '3600',
+          cacheControl: '0',
           upsert: true,
           contentType: 'image/jpeg',
         });
