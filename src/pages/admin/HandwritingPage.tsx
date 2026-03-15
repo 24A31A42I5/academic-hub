@@ -123,12 +123,15 @@ const HandwritingPage = () => {
         }
       }
 
-      // Clear handwriting from student_details
+      // Clear all handwriting fields from student_details
       const { error } = await supabase
         .from('student_details')
         .update({
           handwriting_url: null,
           handwriting_submitted_at: null,
+          handwriting_image_hash: null,
+          handwriting_feature_embedding: null,
+          handwriting_features_extracted_at: null,
         })
         .eq('id', student.id);
 
