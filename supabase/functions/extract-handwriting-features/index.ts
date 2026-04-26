@@ -337,7 +337,18 @@ serve(async (req) => {
     }
 
     // Fetch image as base64
-    const imageBase64 = await fetchFileAsBase64(image_url);
+    // Resolve to a storage path within the private handwriting-samples bucket.
+    // We always download via the service-role client so that the bucket can stay
+    // private and we never depend on a publicly accessible URL.
+    const storagePath = getHandwritingStoragePath(image_url);
+    let imageBase64: string;
+    if (storagePath) {
+      imageBase64 = await downloadHandwritingAsBase64(supabase, storagePath);
+    } else {
+      // Backwards compatibility: if for some reason the URL is an external
+      // location (legacy data), fall back to a direct fetch.
+      imageBase64 = await fetchFileAsBase64(image_url);
+    }
     console.log('Image fetched, base64 length:', imageBase64.length);
 
     console.log(`Calling Gemini AI for strict enum extraction (${EXTRACTION_ATTEMPTS} attempts)...`);
