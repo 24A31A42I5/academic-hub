@@ -457,11 +457,17 @@ const HandwritingPage = () => {
               
               {previewStudent.handwriting_url && (
                 <div className="border rounded-lg overflow-hidden">
-                  <img
-                    src={previewStudent.handwriting_url}
-                    alt="Handwriting sample"
-                    className="w-full h-auto max-h-[60vh] object-contain bg-muted"
-                  />
+                  {previewSignedUrl ? (
+                    <img
+                      src={previewSignedUrl}
+                      alt="Handwriting sample"
+                      className="w-full h-auto max-h-[60vh] object-contain bg-muted"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-48 bg-muted text-muted-foreground text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading preview…
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -470,9 +476,9 @@ const HandwritingPage = () => {
             <Button variant="outline" onClick={() => setPreviewStudent(null)}>
               Close
             </Button>
-            {previewStudent?.handwriting_url && (
+            {previewSignedUrl && (
               <Button asChild>
-                <a href={previewStudent.handwriting_url} target="_blank" rel="noopener noreferrer">
+                <a href={previewSignedUrl} target="_blank" rel="noopener noreferrer">
                   <Image className="w-4 h-4 mr-2" />
                   Open Full Size
                 </a>
