@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { toast } from 'sonner';
 import { Loader2, Upload, AlertTriangle, CheckCircle, Image, FileWarning, Lock, Copy, Sparkles, RefreshCw, Zap } from 'lucide-react';
 import { format } from 'date-fns';
+import { getHandwritingSignedUrl } from '@/lib/handwritingUrl';
 
 const navItems = [
   { label: 'Overview', href: '/student', icon: DashboardIcons.Home },
@@ -39,6 +40,22 @@ const StudentHandwriting = () => {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [signedHandwritingUrl, setSignedHandwritingUrl] = useState<string | null>(null);
+
+  // Refresh signed URL whenever the underlying handwriting_url changes.
+  useEffect(() => {
+    let cancelled = false;
+    const url = studentDetails?.handwriting_url;
+    if (!url) {
+      setSignedHandwritingUrl(null);
+      return;
+    }
+    (async () => {
+      const signed = await getHandwritingSignedUrl(url, 600);
+      if (!cancelled) setSignedHandwritingUrl(signed);
+    })();
+    return () => { cancelled = true; };
+  }, [studentDetails?.handwriting_url]);
 
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'student')) {
@@ -390,11 +407,17 @@ const StudentHandwriting = () => {
                 </div>
 
                 <div className="border rounded-lg overflow-hidden">
-                  <img 
-                    src={studentDetails.handwriting_url} 
-                    alt="Your handwriting sample"
-                    className="w-full h-auto max-h-96 object-contain bg-muted"
-                  />
+                  {signedHandwritingUrl ? (
+                    <img
+                      src={signedHandwritingUrl}
+                      alt="Your handwriting sample"
+                      className="w-full h-auto max-h-96 object-contain bg-muted"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-48 bg-muted text-muted-foreground text-sm">
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading preview…
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">

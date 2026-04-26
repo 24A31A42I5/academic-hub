@@ -205,6 +205,32 @@ async function fetchFileAsBase64(url: string): Promise<string> {
   return encode(arrayBuffer);
 }
 
+function getHandwritingStoragePath(urlOrPath: string): string | null {
+  if (!urlOrPath) return null;
+  const clean = urlOrPath.split('?')[0];
+  const marker = '/handwriting-samples/';
+  const idx = clean.indexOf(marker);
+  if (idx >= 0) return clean.substring(idx + marker.length);
+  // Treat as bare path
+  if (!clean.startsWith('http')) return clean;
+  return null;
+}
+
+async function downloadHandwritingAsBase64(
+  supabaseAdmin: any,
+  storagePath: string,
+): Promise<string> {
+  console.log('Downloading handwriting from storage:', storagePath);
+  const { data, error } = await supabaseAdmin.storage
+    .from('handwriting-samples')
+    .download(storagePath);
+  if (error || !data) {
+    throw new Error(`Failed to download handwriting sample: ${error?.message ?? 'unknown'}`);
+  }
+  const arrayBuffer = await data.arrayBuffer();
+  return encode(arrayBuffer);
+}
+
 // ==================== MAIN HANDLER ====================
 
 serve(async (req) => {
@@ -213,23 +239,84 @@ serve(async (req) => {
   }
 
   try {
+    if (!LOVABLE_API_KEY) {
+      return new Response(JSON.stringify({ error: 'Server not configured' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Create Supabase admin client (service role)
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // ==================== AUTHENTICATION ====================
+    const authHeader = req.headers.get('authorization') ?? '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'Missing authorization token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const { image_url, student_details_id, retrain } = await req.json();
 
     console.log('=== HANDWRITING FEATURE EXTRACTION v7.0 START ===');
+    console.log('Caller user ID:', user.id);
     console.log('Student details ID:', student_details_id);
-    console.log('Image URL:', image_url);
     console.log('Retrain mode:', !!retrain);
 
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY is not configured');
-    }
-
     if (!image_url || !student_details_id) {
-      throw new Error('Missing required parameters: image_url and student_details_id');
+      return new Response(JSON.stringify({ error: 'Missing required parameters: image_url and student_details_id' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    // Create Supabase client early (needed for retrain clearing)
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    // ==================== AUTHORIZATION ====================
+    // Caller must be admin OR the student that owns the target student_details row.
+    const { data: callerProfile, error: callerProfileError } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('user_id', user.id)
+      .single();
+
+    if (callerProfileError || !callerProfile) {
+      return new Response(JSON.stringify({ error: 'Caller profile not found' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { data: targetStudent, error: targetError } = await supabase
+      .from('student_details')
+      .select('id, profile_id')
+      .eq('id', student_details_id)
+      .single();
+
+    if (targetError || !targetStudent) {
+      return new Response(JSON.stringify({ error: 'Target student not found' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const isAdmin = callerProfile.role === 'admin';
+    const isOwner = callerProfile.id === targetStudent.profile_id;
+    if (!isAdmin && !isOwner) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // If retraining, clear old features first (service_role bypasses RLS trigger)
     if (retrain) {
@@ -250,7 +337,18 @@ serve(async (req) => {
     }
 
     // Fetch image as base64
-    const imageBase64 = await fetchFileAsBase64(image_url);
+    // Resolve to a storage path within the private handwriting-samples bucket.
+    // We always download via the service-role client so that the bucket can stay
+    // private and we never depend on a publicly accessible URL.
+    const storagePath = getHandwritingStoragePath(image_url);
+    let imageBase64: string;
+    if (storagePath) {
+      imageBase64 = await downloadHandwritingAsBase64(supabase, storagePath);
+    } else {
+      // Backwards compatibility: if for some reason the URL is an external
+      // location (legacy data), fall back to a direct fetch.
+      imageBase64 = await fetchFileAsBase64(image_url);
+    }
     console.log('Image fetched, base64 length:', imageBase64.length);
 
     console.log(`Calling Gemini AI for strict enum extraction (${EXTRACTION_ATTEMPTS} attempts)...`);
