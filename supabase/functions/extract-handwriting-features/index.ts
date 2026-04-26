@@ -217,7 +217,7 @@ function getHandwritingStoragePath(urlOrPath: string): string | null {
 }
 
 async function downloadHandwritingAsBase64(
-  supabaseAdmin: ReturnType<typeof createClient>,
+  supabaseAdmin: any,
   storagePath: string,
 ): Promise<string> {
   console.log('Downloading handwriting from storage:', storagePath);
