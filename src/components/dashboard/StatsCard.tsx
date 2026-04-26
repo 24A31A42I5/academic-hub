@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { forwardRef, ReactNode } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
@@ -38,27 +38,30 @@ const variantStyles = {
   },
 };
 
-export const StatsCard = ({ title, value, icon, trend, variant = 'default', className }: StatsCardProps) => {
-  const styles = variantStyles[variant];
+export const StatsCard = forwardRef<HTMLDivElement, StatsCardProps>(
+  ({ title, value, icon, trend, variant = 'default', className }, ref) => {
+    const styles = variantStyles[variant];
 
-  return (
-    <Card className={cn('hover-lift transition-all duration-300', className)}>
-      <CardContent className="p-6">
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <p className="text-sm text-muted-foreground mb-1">{title}</p>
-            <p className="text-3xl font-bold">{value}</p>
-            {trend && (
-              <p className={cn('text-sm mt-2', trend.positive ? 'text-student' : 'text-destructive')}>
-                {trend.positive ? '↑' : '↓'} {trend.value}% {trend.label}
-              </p>
-            )}
+    return (
+      <Card ref={ref} className={cn('hover-lift transition-all duration-300', className)}>
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <p className="text-sm text-muted-foreground mb-1">{title}</p>
+              <p className="text-3xl font-bold">{value}</p>
+              {trend && (
+                <p className={cn('text-sm mt-2', trend.positive ? 'text-student' : 'text-destructive')}>
+                  {trend.positive ? '↑' : '↓'} {trend.value}% {trend.label}
+                </p>
+              )}
+            </div>
+            <div className={cn('w-12 h-12 rounded-xl flex items-center justify-center', styles.iconBg)}>
+              <div className={styles.iconColor}>{icon}</div>
+            </div>
           </div>
-          <div className={cn('w-12 h-12 rounded-xl flex items-center justify-center', styles.iconBg)}>
-            <div className={styles.iconColor}>{icon}</div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
+        </CardContent>
+      </Card>
+    );
+  }
+);
+StatsCard.displayName = 'StatsCard';
