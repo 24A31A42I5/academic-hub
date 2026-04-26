@@ -274,8 +274,8 @@ const Auth = () => {
                     {/* Role Selection */}
                     <div className="space-y-2">
                       <Label>Select Your Role</Label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {(['admin', 'faculty', 'student'] as Role[]).map((r) =>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['faculty', 'student'] as Role[]).map((r) =>
                       <button
                         key={r}
                         type="button"
