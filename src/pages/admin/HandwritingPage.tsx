@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { Loader2, Search, FileText, Image, Trash2, Eye, Users, CheckCircle, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { logger } from '@/lib/logger';
+import { getHandwritingSignedUrl } from '@/lib/handwritingUrl';
 
 const navItems = [
   { label: 'Overview', href: '/admin', icon: DashboardIcons.Home },
@@ -63,6 +64,21 @@ const HandwritingPage = () => {
   
   // Preview
   const [previewStudent, setPreviewStudent] = useState<StudentWithHandwriting | null>(null);
+  const [previewSignedUrl, setPreviewSignedUrl] = useState<string | null>(null);
+
+  // Generate a fresh signed URL whenever a preview is opened.
+  useEffect(() => {
+    let cancelled = false;
+    if (!previewStudent?.handwriting_url) {
+      setPreviewSignedUrl(null);
+      return;
+    }
+    (async () => {
+      const signed = await getHandwritingSignedUrl(previewStudent.handwriting_url, 600);
+      if (!cancelled) setPreviewSignedUrl(signed);
+    })();
+    return () => { cancelled = true; };
+  }, [previewStudent?.handwriting_url]);
 
   const fetchStudents = useCallback(async () => {
     try {
