@@ -312,7 +312,12 @@ const VerificationReportsPage = () => {
                           Details
                         </Button>
                         <Button variant="ghost" size="sm" asChild>
-                          <a href={report.file_url} target="_blank" rel="noopener noreferrer">
+                          <a
+                            href={report.file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open submission file for ${report.student_profile?.full_name ?? 'student'} in a new tab`}
+                          >
                             <ExternalLink className="w-4 h-4" />
                           </a>
                         </Button>

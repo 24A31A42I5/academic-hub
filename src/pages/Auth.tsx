@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Shield, ArrowLeft, Loader2 } from 'lucide-react';
 import { z } from 'zod';
 import { passwordSchema, emailSchema, fullNameSchema } from '@/lib/validation';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 const loginSchema = z.object({
   email: emailSchema,
@@ -55,6 +56,16 @@ const Auth = () => {
   const [mode, setMode] = useState<'login' | 'register'>(isRegister ? 'register' : 'login');
   const [role, setRole] = useState<Role>('student');
   const [loading, setLoading] = useState(false);
+
+  usePageMeta({
+    title: mode === 'login'
+      ? 'Sign In | Academic Hub'
+      : 'Create Account | Academic Hub',
+    description: mode === 'login'
+      ? 'Sign in to Academic Hub to access AI-powered assignment, grading, and handwriting verification tools.'
+      : 'Create an Academic Hub account to start using AI-powered handwriting verification and assignment management.',
+    canonical: '/auth',
+  });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState({
@@ -217,8 +228,8 @@ const Auth = () => {
           <div className="w-20 h-20 rounded-2xl bg-primary-foreground/20 backdrop-blur-sm flex items-center justify-center mb-8">
             <Shield className="w-12 h-12" />
           </div>
-          <h1 className="text-4xl font-bold mb-4 text-center">Academic Hub
-
+          <h1 className="text-4xl font-bold mb-4 text-center">
+            Academic Hub — AI-Powered Academic Integrity
           </h1>
           <p className="text-xl text-primary-foreground/80 text-center max-w-md">
             AI-Powered Academic Integrity Management System
@@ -259,6 +270,9 @@ const Auth = () => {
               <div className="lg:hidden w-12 h-12 mx-auto rounded-xl bg-gradient-to-br from-primary to-faculty flex items-center justify-center mb-4">
                 <Shield className="w-7 h-7 text-primary-foreground" />
               </div>
+              <h1 className="lg:hidden text-2xl font-bold mb-2">
+                Academic Hub — AI-Powered Academic Integrity
+              </h1>
               <CardTitle className="text-2xl">
                 {mode === 'login' ? 'Welcome Back' : 'Create Account'}
               </CardTitle>

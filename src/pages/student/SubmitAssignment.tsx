@@ -542,6 +542,7 @@ const SubmitAssignment = () => {
                         size="sm"
                         onClick={() => removeImage(img.id)}
                         className="h-8"
+                        aria-label={`Remove page ${index + 1}`}
                       >
                         <X className="w-4 h-4" />
                       </Button>

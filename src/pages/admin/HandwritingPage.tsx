@@ -375,6 +375,7 @@ const HandwritingPage = () => {
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => setPreviewStudent(student)}
+                                aria-label={`View handwriting sample for ${student.profiles.full_name}`}
                               >
                                 <Eye className="w-4 h-4" />
                               </Button>
@@ -385,6 +386,7 @@ const HandwritingPage = () => {
                                     size="icon"
                                     className="text-destructive hover:text-destructive"
                                     disabled={deleting === student.id}
+                                    aria-label={`Delete handwriting sample for ${student.profiles.full_name}`}
                                   >
                                     {deleting === student.id ? (
                                       <Loader2 className="w-4 h-4 animate-spin" />

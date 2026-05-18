@@ -1,8 +1,15 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Shield, GraduationCap, Users, Brain, CheckCircle, ArrowRight } from 'lucide-react';
+import { usePageMeta } from '@/hooks/usePageMeta';
 
 const Index = () => {
+  usePageMeta({
+    title: 'Academic Hub — AI Academic Integrity Platform',
+    description: 'AI-powered handwriting verification and assignment management. Detect fraud, streamline grading, and protect academic integrity across your institution.',
+    canonical: '/',
+  });
+
   const features = [
   {
     icon: Shield,
