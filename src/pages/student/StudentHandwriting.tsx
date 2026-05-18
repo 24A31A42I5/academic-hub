@@ -410,7 +410,7 @@ const StudentHandwriting = () => {
                   {signedHandwritingUrl ? (
                     <img
                       src={signedHandwritingUrl}
-                      alt="Your handwriting sample"
+                      alt="Handwriting sample preview"
                       className="w-full h-auto max-h-96 object-contain bg-muted"
                     />
                   ) : (

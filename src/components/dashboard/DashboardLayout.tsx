@@ -153,7 +153,8 @@ export const DashboardLayout = ({ children, title, role, navItems }: DashboardLa
             <div className="flex items-center gap-4">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 rounded-lg hover:bg-muted">
+                className="lg:hidden p-2 rounded-lg hover:bg-muted"
+                aria-label="Open navigation menu">
 
                 <Menu className="w-6 h-6" />
               </button>

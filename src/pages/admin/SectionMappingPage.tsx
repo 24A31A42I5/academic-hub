@@ -423,7 +423,12 @@ const SectionMappingPage = () => {
                       <TableCell>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive"
+                              aria-label={`Delete mapping for ${m.profiles?.full_name ?? 'faculty'}`}
+                            >
                               <Trash2 className="w-4 h-4" />
                             </Button>
                           </AlertDialogTrigger>
