@@ -1,0 +1,10 @@
+# Academic Hub
+
+> AI-powered academic integrity platform for institutions. Detects handwriting fraud, manages assignments, and streamlines grading across admin, faculty, and student roles.
+
+Academic Hub helps colleges and universities maintain academic integrity using AI-based handwriting verification. Faculty create assignments, students submit handwritten work, and the system verifies authorship against an enrolled handwriting profile.
+
+## Pages
+
+- [Home](/): Overview of the platform, features, and how it works.
+- [Sign In / Register](/auth): Authentication for admin, faculty, and student roles.
