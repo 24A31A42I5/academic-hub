@@ -119,55 +119,82 @@ const SubmitAssignment = () => {
     return null;
   };
 
-  const normalizeImageFile = (file: File): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
+  const resizeAndEncode = async (
+    source: CanvasImageSource,
+    srcW: number,
+    srcH: number
+  ): Promise<Blob> => {
+    let w = srcW;
+    let h = srcH;
+    if (w > 1920 || h > 1920) {
+      if (w >= h) {
+        h = Math.round(h * (1920 / w));
+        w = 1920;
+      } else {
+        w = Math.round(w * (1920 / h));
+        h = 1920;
+      }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas context unavailable');
+    ctx.drawImage(source, 0, 0, w, h);
+    const blob: Blob | null = await new Promise((resolve) =>
+      canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.85)
+    );
+    canvas.width = 0;
+    canvas.height = 0;
+    if (!blob) throw new Error('Canvas toBlob returned null');
+    return blob;
+  };
+
+  const normalizeImageFile = async (file: File): Promise<Blob> => {
+    // Attempt 1: createImageBitmap — most robust on mobile, handles EXIF orientation
+    if (typeof createImageBitmap === 'function') {
+      try {
+        let bitmap: ImageBitmap;
+        try {
+          bitmap = await createImageBitmap(file, {
+            imageOrientation: 'from-image',
+          } as ImageBitmapOptions);
+        } catch {
+          bitmap = await createImageBitmap(file);
+        }
+        try {
+          return await resizeAndEncode(bitmap, bitmap.width, bitmap.height);
+        } finally {
+          bitmap.close?.();
+        }
+      } catch (e) {
+        console.warn('createImageBitmap failed, falling back to <img>', e);
+      }
+    }
+
+    // Attempt 2: HTMLImageElement via object URL
+    return new Promise<Blob>((resolve, reject) => {
       const objectUrl = URL.createObjectURL(file);
       const imgEl = new window.Image();
-
-      imgEl.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-
-        let { naturalWidth: w, naturalHeight: h } = imgEl;
-
-        if (w > 1920 || h > 1920) {
-          if (w >= h) {
-            h = Math.round(h * (1920 / w));
-            w = 1920;
-          } else {
-            w = Math.round(w * (1920 / h));
-            h = 1920;
-          }
+      imgEl.decoding = 'async';
+      imgEl.onload = async () => {
+        try {
+          const blob = await resizeAndEncode(imgEl, imgEl.naturalWidth, imgEl.naturalHeight);
+          resolve(blob);
+        } catch (err) {
+          reject(err);
+        } finally {
+          URL.revokeObjectURL(objectUrl);
         }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Canvas context unavailable'));
-          return;
-        }
-
-        ctx.drawImage(imgEl, 0, 0, w, h);
-
-        canvas.toBlob(
-          (blob) => {
-            canvas.width = 0;
-            canvas.height = 0;
-            if (blob) resolve(blob);
-            else reject(new Error('Canvas toBlob returned null'));
-          },
-          'image/jpeg',
-          0.85
-        );
       };
-
       imgEl.onerror = () => {
         URL.revokeObjectURL(objectUrl);
-        reject(new Error('Image failed to load — file may be corrupted'));
+        reject(
+          new Error(
+            `Could not read "${file.name}". If it was taken with your phone camera (HEIC/HEIF), open it in Photos and export as JPG, then re-upload.`
+          )
+        );
       };
-
       imgEl.src = objectUrl;
     });
   };
