@@ -150,53 +150,89 @@ const SubmitAssignment = () => {
     return blob;
   };
 
-  const normalizeImageFile = async (file: File): Promise<Blob> => {
-    // Attempt 1: createImageBitmap — most robust on mobile, handles EXIF orientation
+  // Materialize the file bytes into an in-memory Blob.
+  // Android Chrome's Google Photos picker returns lazy content:// File objects;
+  // by the time submit runs, createImageBitmap/<img> can't fetch them anymore.
+  // Reading bytes up-front guarantees the data stays available.
+  const materializeFile = async (file: File): Promise<Blob> => {
+    try {
+      const buf = await file.arrayBuffer();
+      const type = file.type || 'image/jpeg';
+      return new Blob([buf], { type });
+    } catch (e) {
+      console.warn('arrayBuffer() failed, falling back to FileReader', e);
+      return new Promise<Blob>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as ArrayBuffer;
+          resolve(new Blob([result], { type: file.type || 'image/jpeg' }));
+        };
+        reader.onerror = () =>
+          reject(new Error(`Could not read "${file.name}" from your device.`));
+        reader.readAsArrayBuffer(file);
+      });
+    }
+  };
+
+  const decodeBlobToBitmapOrImg = async (
+    blob: Blob,
+    fileName: string
+  ): Promise<{ source: CanvasImageSource; w: number; h: number; cleanup: () => void }> => {
+    // Attempt 1: createImageBitmap on the in-memory blob (handles EXIF orientation)
     if (typeof createImageBitmap === 'function') {
       try {
         let bitmap: ImageBitmap;
         try {
-          bitmap = await createImageBitmap(file, {
+          bitmap = await createImageBitmap(blob, {
             imageOrientation: 'from-image',
           } as ImageBitmapOptions);
         } catch {
-          bitmap = await createImageBitmap(file);
+          bitmap = await createImageBitmap(blob);
         }
-        try {
-          return await resizeAndEncode(bitmap, bitmap.width, bitmap.height);
-        } finally {
-          bitmap.close?.();
-        }
+        return {
+          source: bitmap,
+          w: bitmap.width,
+          h: bitmap.height,
+          cleanup: () => bitmap.close?.(),
+        };
       } catch (e) {
         console.warn('createImageBitmap failed, falling back to <img>', e);
       }
     }
 
-    // Attempt 2: HTMLImageElement via object URL
-    return new Promise<Blob>((resolve, reject) => {
-      const objectUrl = URL.createObjectURL(file);
+    // Attempt 2: HTMLImageElement via object URL on the in-memory blob
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(blob);
       const imgEl = new window.Image();
       imgEl.decoding = 'async';
-      imgEl.onload = async () => {
-        try {
-          const blob = await resizeAndEncode(imgEl, imgEl.naturalWidth, imgEl.naturalHeight);
-          resolve(blob);
-        } catch (err) {
-          reject(err);
-        } finally {
-          URL.revokeObjectURL(objectUrl);
-        }
+      imgEl.onload = () => {
+        resolve({
+          source: imgEl,
+          w: imgEl.naturalWidth,
+          h: imgEl.naturalHeight,
+          cleanup: () => URL.revokeObjectURL(objectUrl),
+        });
       };
       imgEl.onerror = () => {
         URL.revokeObjectURL(objectUrl);
         reject(
           new Error(
-            `Could not read "${file.name}". If it was taken with your phone camera (HEIC/HEIF), open it in Photos and export as JPG, then re-upload.`
+            `Could not decode "${fileName}". If it's HEIC/HEIF (iPhone), open it in Photos and export as JPG, then re-upload.`
           )
         );
       };
       imgEl.src = objectUrl;
     });
+  };
+
+  const normalizeImageFile = async (file: File): Promise<Blob> => {
+    const blob = await materializeFile(file);
+    const { source, w, h, cleanup } = await decodeBlobToBitmapOrImg(blob, file.name);
+    try {
+      return await resizeAndEncode(source, w, h);
+    } finally {
+      cleanup();
+    }
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
