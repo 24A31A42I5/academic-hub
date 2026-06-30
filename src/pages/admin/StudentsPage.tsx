@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { Loader2, Upload, Search, Users, CheckCircle, XCircle, FileSpreadsheet, Download, Pencil, Trash2, RotateCcw, FileEdit } from 'lucide-react';
-import * as XLSX from 'xlsx';
+// xlsx is dynamic-imported on demand (file parse / template download) to keep it out of the initial bundle
 import { logger } from '@/lib/logger';
 
 const navItems = [
@@ -147,6 +147,7 @@ const StudentsPage = () => {
     }
 
     try {
+      const XLSX = await import('xlsx');
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data);
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -224,7 +225,8 @@ const StudentsPage = () => {
     }
   };
 
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
+    const XLSX = await import('xlsx');
     const template = [
       { Name: 'John Doe', Email: 'john@example.com', Password: 'Secure@Pass1', 'Roll Number': 'CS001', 'Phone Number': '9876543210' },
       { Name: 'Jane Smith', Email: 'jane@example.com', Password: 'Strong#Pass2', 'Roll Number': 'CS002', 'Phone Number': '9876543211' },

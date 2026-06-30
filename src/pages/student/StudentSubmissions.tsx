@@ -207,7 +207,6 @@ const StudentSubmissions = () => {
           filter: `student_profile_id=eq.${profile.id}`,
         },
         (payload) => {
-          console.log('Submission updated:', payload);
           const updated = payload.new as any;
           
           // Update the local state with the new data
