@@ -148,6 +148,12 @@ const FacultyReviews = () => {
   const handleSaveReview = async () => {
     if (!viewSubmission) return;
 
+    const parsedMarks = reviewForm.marks ? parseFloat(reviewForm.marks) : null;
+    if (parsedMarks !== null && (isNaN(parsedMarks) || parsedMarks < 0 || parsedMarks > 5)) {
+      toast.error('Marks must be between 0 and 5');
+      return;
+    }
+
     setSaving(true);
     try {
       const { error } = await supabase
@@ -400,12 +406,15 @@ const FacultyReviews = () => {
               </Card>
 
               <div>
-                <Label>Marks</Label>
+                <Label>Marks (out of 5)</Label>
                 <Input
                   type="number"
+                  min={0}
+                  max={5}
+                  step={0.5}
                   value={reviewForm.marks}
                   onChange={(e) => setReviewForm({ ...reviewForm, marks: e.target.value })}
-                  placeholder="Enter marks (optional)"
+                  placeholder="0 - 5 (optional)"
                 />
               </div>
               <div>

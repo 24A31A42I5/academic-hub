@@ -215,6 +215,12 @@ const FacultySubmissions = () => {
   const handleGrade = async (sendEmail: boolean = false) => {
     if (!gradeSubmission) return;
 
+    const parsedMarks = gradeForm.marks ? parseFloat(gradeForm.marks) : null;
+    if (parsedMarks !== null && (isNaN(parsedMarks) || parsedMarks < 0 || parsedMarks > 5)) {
+      toast.error('Marks must be between 0 and 5');
+      return;
+    }
+
     setSaving(true);
     try {
       const { error } = await supabase
@@ -711,12 +717,15 @@ const FacultySubmissions = () => {
                 )}
               </div>
               <div>
-                <Label>Marks</Label>
+                <Label>Marks (out of 5)</Label>
                 <Input
                   type="number"
+                  min={0}
+                  max={5}
+                  step={0.5}
                   value={gradeForm.marks}
                   onChange={(e) => setGradeForm({ ...gradeForm, marks: e.target.value })}
-                  placeholder="Enter marks"
+                  placeholder="0 - 5"
                 />
               </div>
               <div>
