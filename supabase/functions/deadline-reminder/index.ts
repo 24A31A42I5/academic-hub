@@ -8,7 +8,6 @@ const corsHeaders = {
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const CRON_SECRET = Deno.env.get("CRON_SECRET")!;
 
 serve(async (req: Request) => {
   console.log("deadline-reminder function invoked at", new Date().toISOString());
@@ -17,19 +16,30 @@ serve(async (req: Request) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Only allow invocation from the scheduled cron job (shared secret) or
-  // from a trusted server holding the service role key.
+  // Only allow invocation from the scheduled cron job (shared secret stored in
+  // public.internal_secrets, readable only by service_role) or from a trusted
+  // server holding the service role key.
   const authHeader = req.headers.get("authorization") ?? "";
   const bearer = authHeader.replace("Bearer ", "").trim();
   const cronSecretHeader = req.headers.get("x-cron-secret") ?? "";
+
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+  const { data: secretRow } = await supabaseAdmin
+    .from("internal_secrets")
+    .select("value")
+    .eq("name", "deadline_reminder")
+    .maybeSingle();
+  const expectedSecret = secretRow?.value ?? "";
+
   const isAuthorized =
-    (CRON_SECRET && cronSecretHeader === CRON_SECRET) ||
-    (supabaseServiceKey && bearer === supabaseServiceKey);
+    (bearer && bearer === supabaseServiceKey) ||
+    (expectedSecret && cronSecretHeader === expectedSecret);
   if (!isAuthorized) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
+
 
 
   try {
