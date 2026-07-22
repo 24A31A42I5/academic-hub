@@ -179,8 +179,10 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // Use provided password or default
-        const password = student.password || "Student@123";
+        // Use provided password, or generate a unique secure one per student
+        const password = student.password && isStrongPassword(student.password)
+          ? student.password
+          : generateSecurePassword();
 
         // Create user in auth
         const { data: authData, error: createError } = await supabaseAdmin.auth.admin.createUser({
