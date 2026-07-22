@@ -710,6 +710,35 @@ serve(async (req) => {
   }
 
   try {
+    // ==================== AUTHENTICATION ====================
+    const authHeader = req.headers.get('authorization') ?? '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Resolve caller profile & role
+    const { data: callerProfile } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('user_id', user.id)
+      .single();
+    if (!callerProfile) {
+      return new Response(JSON.stringify({ error: 'Profile not found' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const body = await req.json();
     const { submission_id, file_urls, file_url, student_profile_id } = body;
 
@@ -720,10 +749,9 @@ serve(async (req) => {
     console.log('Image URLs:', imageUrls.length, 'pages');
     console.log('Student Profile ID:', student_profile_id);
 
+    if (!submission_id) throw new Error('submission_id is required');
     if (imageUrls.length === 0) throw new Error('No image URLs provided');
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY is not configured');
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Load feature statistics for weighted comparison
     const { data: featureStats, error: statsError } = await supabase
@@ -739,16 +767,38 @@ serve(async (req) => {
     });
     console.log('Loaded', weightMap.size, 'feature weights');
 
-    // Ownership verification
-    const { data: ownerCheck } = await supabase
+    // Ownership / authorization verification
+    const { data: submissionRow } = await supabase
       .from('submissions')
-      .select('student_profile_id')
+      .select('student_profile_id, assignment_id')
       .eq('id', submission_id)
       .single();
 
-    if (!ownerCheck || ownerCheck.student_profile_id !== student_profile_id) {
+    if (!submissionRow) throw new Error('Submission not found');
+
+    if (submissionRow.student_profile_id !== student_profile_id) {
       throw new Error('Submission does not belong to the claimed student profile');
     }
+
+    // Authorization: owning student, assignment faculty, or admin
+    const isOwner = callerProfile.id === submissionRow.student_profile_id;
+    let isFaculty = false;
+    if (callerProfile.role === 'faculty') {
+      const { data: assignment } = await supabase
+        .from('assignments')
+        .select('faculty_profile_id')
+        .eq('id', submissionRow.assignment_id)
+        .single();
+      isFaculty = assignment?.faculty_profile_id === callerProfile.id;
+    }
+    const isAdmin = callerProfile.role === 'admin';
+
+    if (!isOwner && !isFaculty && !isAdmin) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
 
     const { data: studentProfile } = await supabase
       .from('profiles')
