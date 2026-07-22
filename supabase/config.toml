@@ -10,7 +10,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.verify-handwriting]
-verify_jwt = false
+verify_jwt = true
 
 [functions.extract-handwriting-features]
 verify_jwt = false
@@ -20,3 +20,4 @@ verify_jwt = false
 
 [functions.resolve-submission-files]
 verify_jwt = false
+
