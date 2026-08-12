@@ -393,34 +393,29 @@ const SubmitAssignment = () => {
       toast.success(`${uploadedUrls.length} page(s) submitted! AI verification started.`);
       
       // Trigger AI handwriting verification with all image URLs
-      // Refresh the session first — a stale token makes the function return 401.
-      supabase.auth.getSession().then(({ data: sessionData }) => {
-        if (!sessionData.session) {
-          toast.error('Your session expired. Please sign in again to run verification.');
-          return { error: null };
-        }
-        return invokeEdgeFunction('verify-handwriting', {
-          body: {
-            submission_id: submissionId,
-            file_urls: uploadedUrls,
-            file_type: 'image/jpeg',
-            student_profile_id: profile.id,
-            page_count: uploadedUrls.length,
-          },
-        });
-      }).then((res) => {
-        const error = res?.error;
-
+      // (session freshness + 401 retry handled by invokeEdgeFunction)
+      invokeEdgeFunction('verify-handwriting', {
+        body: {
+          submission_id: submissionId,
+          file_urls: uploadedUrls,
+          file_type: 'image/jpeg',
+          student_profile_id: profile.id,
+          page_count: uploadedUrls.length,
+        },
+      }).then(({ error }) => {
         if (error) {
           console.error('Verification error:', error);
-          toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
-        } else {
-          console.log('Handwriting verification completed');
+          toast.error(
+            error.name === 'SessionExpiredError'
+              ? 'Your session expired. Please sign in again to run verification.'
+              : 'Handwriting verification failed. Your submission is saved but may need manual review.'
+          );
         }
       }).catch((err) => {
         console.error('Verification failed:', err);
         toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
       });
+
     } catch (error: any) {
       console.error('Error submitting assignment:', error);
       toast.error(error.message || 'Failed to submit assignment. Please try again.');
