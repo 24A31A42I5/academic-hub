@@ -392,15 +392,24 @@ const SubmitAssignment = () => {
       toast.success(`${uploadedUrls.length} page(s) submitted! AI verification started.`);
       
       // Trigger AI handwriting verification with all image URLs
-      supabase.functions.invoke('verify-handwriting', {
-        body: {
-          submission_id: submissionId,
-          file_urls: uploadedUrls,
-          file_type: 'image/jpeg',
-          student_profile_id: profile.id,
-          page_count: uploadedUrls.length,
-        },
-      }).then(({ error }) => {
+      // Refresh the session first — a stale token makes the function return 401.
+      supabase.auth.getSession().then(({ data: sessionData }) => {
+        if (!sessionData.session) {
+          toast.error('Your session expired. Please sign in again to run verification.');
+          return { error: null };
+        }
+        return supabase.functions.invoke('verify-handwriting', {
+          body: {
+            submission_id: submissionId,
+            file_urls: uploadedUrls,
+            file_type: 'image/jpeg',
+            student_profile_id: profile.id,
+            page_count: uploadedUrls.length,
+          },
+        });
+      }).then((res) => {
+        const error = res?.error;
+
         if (error) {
           console.error('Verification error:', error);
           toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
