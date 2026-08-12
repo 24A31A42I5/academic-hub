@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { ExternalLink, Download, Image, Loader2, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
 
 interface FilePreviewDialogProps {
   open: boolean;
@@ -43,7 +44,7 @@ const FilePreviewDialog = ({
 
     const attemptFetch = async (attempt: number): Promise<string[]> => {
       try {
-        const { data, error } = await supabase.functions.invoke('resolve-submission-files', {
+        const { data, error } = await invokeEdgeFunction('resolve-submission-files', {
           body: { submission_id: submissionId }
         });
 

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -398,7 +399,7 @@ const SubmitAssignment = () => {
           toast.error('Your session expired. Please sign in again to run verification.');
           return { error: null };
         }
-        return supabase.functions.invoke('verify-handwriting', {
+        return invokeEdgeFunction('verify-handwriting', {
           body: {
             submission_id: submissionId,
             file_urls: uploadedUrls,

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -230,7 +231,7 @@ const StudentHandwriting = () => {
       setExtractingFeatures(true);
 
       try {
-        const { data: featureData, error: featureError } = await supabase.functions.invoke('extract-handwriting-features', {
+        const { data: featureData, error: featureError } = await invokeEdgeFunction('extract-handwriting-features', {
           body: {
             image_url: publicUrl,
             student_details_id: studentDetails.id,
@@ -300,7 +301,7 @@ const StudentHandwriting = () => {
       const freshUrl = `${studentDetails.handwriting_url.split('?')[0]}?t=${Date.now()}`;
 
       // Call edge function which runs with service_role and can clear + re-extract
-      const { data, error } = await supabase.functions.invoke('extract-handwriting-features', {
+      const { data, error } = await invokeEdgeFunction('extract-handwriting-features', {
         body: {
           image_url: freshUrl,
           student_details_id: studentDetails.id,

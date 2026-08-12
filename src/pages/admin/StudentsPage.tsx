@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -194,7 +195,7 @@ const StudentsPage = () => {
         semester: uploadSemester,
       }));
 
-      const response = await supabase.functions.invoke('bulk-create-students', {
+      const response = await invokeEdgeFunction('bulk-create-students', {
         body: { students: studentsData },
       });
 
@@ -293,7 +294,7 @@ const StudentsPage = () => {
       // Update password if provided
       if (editForm.password.trim()) {
         const { data: sessionData } = await supabase.auth.getSession();
-        const response = await supabase.functions.invoke('update-user-password', {
+        const response = await invokeEdgeFunction('update-user-password', {
           body: { user_id: editStudent.user_id, password: editForm.password.trim() },
         });
         if (response.error) {

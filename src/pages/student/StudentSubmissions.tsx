@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -132,7 +133,7 @@ const StudentSubmissions = () => {
           ? [submission.file_url]
           : [];
 
-      const { data, error } = await supabase.functions.invoke('verify-handwriting', {
+      const { data, error } = await invokeEdgeFunction('verify-handwriting', {
 
         body: {
           submission_id: submission.id,
