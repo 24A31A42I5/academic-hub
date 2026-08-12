@@ -262,7 +262,13 @@ const StudentHandwriting = () => {
       setPreviewUrl(null);
     } catch (error: any) {
       console.error('Error uploading handwriting:', error);
-      toast.error(error.message || 'Failed to upload handwriting sample');
+      const msg = String(error?.message || '');
+      toast.error(
+        msg.includes('protected fields')
+          ? 'A handwriting sample already exists on your account. Ask your administrator to remove it before uploading a new one.'
+          : msg || 'Failed to upload handwriting sample',
+      );
+
     } finally {
       setUploading(false);
       setExtractingFeatures(false);
