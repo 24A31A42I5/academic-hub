@@ -22,7 +22,7 @@ const isUnauthorized = (error: unknown) => {
  * ("Unauthorized"). This helper ensures a session exists, retries once after a
  * forced refresh, and surfaces a clear error when the user must sign in again.
  */
-export async function invokeEdgeFunction<T = unknown>(
+export async function invokeEdgeFunction<T = any>(
   name: string,
   options?: InvokeOptions
 ): Promise<{ data: T | null; error: Error | null }> {
