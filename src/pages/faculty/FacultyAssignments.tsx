@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -163,7 +164,7 @@ const FacultyAssignments = () => {
             return s.phone_number;
           }).filter(Boolean) as string[];
           
-          await supabase.functions.invoke('send-notification', {
+          await invokeEdgeFunction('send-notification', {
             body: {
               type: 'new_assignment',
               data: {
@@ -259,7 +260,7 @@ const FacultyAssignments = () => {
       const now = new Date();
       const hoursRemaining = Math.max(0, Math.round((deadline.getTime() - now.getTime()) / (60 * 60 * 1000)));
 
-      const { error } = await supabase.functions.invoke('send-notification', {
+      const { error } = await invokeEdgeFunction('send-notification', {
         body: {
           type: 'deadline_reminder',
           data: {

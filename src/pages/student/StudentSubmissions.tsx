@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -118,13 +119,6 @@ const StudentSubmissions = () => {
     toast.info('Starting verification...', { duration: 2000 });
 
     try {
-      // Ensure the session is still valid (stale tokens cause 401 Unauthorized)
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        toast.error('Your session expired. Please sign in again.');
-        return;
-      }
-
       // Fix 6: Send all pages, not just file_url
       const allFileUrls = submission.file_urls?.length
         ? submission.file_urls
@@ -132,7 +126,8 @@ const StudentSubmissions = () => {
           ? [submission.file_url]
           : [];
 
-      const { data, error } = await supabase.functions.invoke('verify-handwriting', {
+      const { data, error } = await invokeEdgeFunction('verify-handwriting', {
+
 
         body: {
           submission_id: submission.id,

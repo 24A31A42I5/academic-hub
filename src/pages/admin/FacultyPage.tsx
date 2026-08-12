@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -135,7 +136,7 @@ const FacultyPage = () => {
   const handleBulkCreate = async () => {
     setUploading(true);
     try {
-      const response = await supabase.functions.invoke('bulk-create-faculty', {
+      const response = await invokeEdgeFunction('bulk-create-faculty', {
         body: { faculty: parsedFaculty },
       });
 
@@ -170,7 +171,7 @@ const FacultyPage = () => {
 
     setCreatingOne(true);
     try {
-      const response = await supabase.functions.invoke('bulk-create-faculty', {
+      const response = await invokeEdgeFunction('bulk-create-faculty', {
         body: { faculty: [singleFaculty] },
       });
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -237,7 +238,7 @@ const FacultySubmissions = () => {
       // Send email notification if requested
       if (sendEmail && gradeSubmission.student_profile?.email) {
         try {
-          await supabase.functions.invoke('send-notification', {
+          await invokeEdgeFunction('send-notification', {
             body: {
               type: 'assignment_graded',
               data: {
