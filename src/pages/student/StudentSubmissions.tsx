@@ -118,6 +118,13 @@ const StudentSubmissions = () => {
     toast.info('Starting verification...', { duration: 2000 });
 
     try {
+      // Ensure the session is still valid (stale tokens cause 401 Unauthorized)
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        toast.error('Your session expired. Please sign in again.');
+        return;
+      }
+
       // Fix 6: Send all pages, not just file_url
       const allFileUrls = submission.file_urls?.length
         ? submission.file_urls
@@ -126,6 +133,7 @@ const StudentSubmissions = () => {
           : [];
 
       const { data, error } = await supabase.functions.invoke('verify-handwriting', {
+
         body: {
           submission_id: submission.id,
           file_urls: allFileUrls,

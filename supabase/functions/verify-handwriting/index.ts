@@ -720,18 +720,33 @@ serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) {
+
+    // Validate the caller's JWT. Prefer local verification via getClaims (works
+    // with asymmetric signing keys), fall back to a server round-trip.
+    let userId: string | null = null;
+    try {
+      const authClient = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY') ?? '');
+      const { data: claimsData } = await authClient.auth.getClaims(token);
+      userId = (claimsData?.claims?.sub as string | undefined) ?? null;
+    } catch (_) { /* fall through */ }
+
+    if (!userId) {
+      const { data: { user } } = await supabase.auth.getUser(token);
+      userId = user?.id ?? null;
+    }
+
+    if (!userId) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
+
     // Resolve caller profile & role
     const { data: callerProfile } = await supabase
       .from('profiles')
       .select('id, role')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single();
     if (!callerProfile) {
       return new Response(JSON.stringify({ error: 'Profile not found' }), {
