@@ -141,9 +141,10 @@ const StudentHandwriting = () => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
+    // Validate file type (some mobile browsers omit MIME types -> fall back to extension)
     const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
+    const hasValidExtension = /\.(jpe?g|png|webp)$/i.test(file.name);
+    if (!(file.type ? allowedTypes.includes(file.type) : hasValidExtension)) {
       toast.error('Please upload an image file (JPG, PNG, or WebP)');
       return;
     }
@@ -159,6 +160,7 @@ const StudentHandwriting = () => {
     setShowConfirmDialog(true);
   };
 
+
   const handleUpload = async () => {
     if (!selectedFile || !user || !studentDetails) return;
 
@@ -167,18 +169,21 @@ const StudentHandwriting = () => {
       // Compute hash of original file
       const imageHash = await computeFileHash(selectedFile);
       
-      // Check if this exact image has been uploaded before
-      const { data: existingHash } = await supabase
+      // Check if this exact image has been uploaded before (limit(1) avoids
+      // maybeSingle() throwing when several rows share a hash)
+      const { data: existingHashRows } = await supabase
         .from('student_details')
         .select('id, profile_id')
         .eq('handwriting_image_hash', imageHash)
-        .maybeSingle();
-      
+        .limit(1);
+
+      const existingHash = existingHashRows?.[0];
       if (existingHash && existingHash.profile_id !== profile?.id) {
         toast.error('This image has already been used by another student. Please upload your own handwriting sample.');
         setUploading(false);
         return;
       }
+
 
       // Strip EXIF data
       const strippedImage = await stripExifData(selectedFile);
@@ -257,7 +262,13 @@ const StudentHandwriting = () => {
       setPreviewUrl(null);
     } catch (error: any) {
       console.error('Error uploading handwriting:', error);
-      toast.error(error.message || 'Failed to upload handwriting sample');
+      const msg = String(error?.message || '');
+      toast.error(
+        msg.includes('protected fields')
+          ? 'A handwriting sample already exists on your account. Ask your administrator to remove it before uploading a new one.'
+          : msg || 'Failed to upload handwriting sample',
+      );
+
     } finally {
       setUploading(false);
       setExtractingFeatures(false);
