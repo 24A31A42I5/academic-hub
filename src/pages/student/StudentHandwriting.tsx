@@ -169,18 +169,21 @@ const StudentHandwriting = () => {
       // Compute hash of original file
       const imageHash = await computeFileHash(selectedFile);
       
-      // Check if this exact image has been uploaded before
-      const { data: existingHash } = await supabase
+      // Check if this exact image has been uploaded before (limit(1) avoids
+      // maybeSingle() throwing when several rows share a hash)
+      const { data: existingHashRows } = await supabase
         .from('student_details')
         .select('id, profile_id')
         .eq('handwriting_image_hash', imageHash)
-        .maybeSingle();
-      
+        .limit(1);
+
+      const existingHash = existingHashRows?.[0];
       if (existingHash && existingHash.profile_id !== profile?.id) {
         toast.error('This image has already been used by another student. Please upload your own handwriting sample.');
         setUploading(false);
         return;
       }
+
 
       // Strip EXIF data
       const strippedImage = await stripExifData(selectedFile);
