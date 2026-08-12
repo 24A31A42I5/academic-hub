@@ -141,9 +141,10 @@ const StudentHandwriting = () => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
+    // Validate file type (some mobile browsers omit MIME types -> fall back to extension)
     const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
+    const hasValidExtension = /\.(jpe?g|png|webp)$/i.test(file.name);
+    if (!(file.type ? allowedTypes.includes(file.type) : hasValidExtension)) {
       toast.error('Please upload an image file (JPG, PNG, or WebP)');
       return;
     }
@@ -158,6 +159,7 @@ const StudentHandwriting = () => {
     setPreviewUrl(URL.createObjectURL(file));
     setShowConfirmDialog(true);
   };
+
 
   const handleUpload = async () => {
     if (!selectedFile || !user || !studentDetails) return;
