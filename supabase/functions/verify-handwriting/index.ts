@@ -746,7 +746,7 @@ serve(async (req) => {
     const { data: callerProfile } = await supabase
       .from('profiles')
       .select('id, role')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .single();
     if (!callerProfile) {
       return new Response(JSON.stringify({ error: 'Profile not found' }), {
