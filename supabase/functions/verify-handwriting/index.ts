@@ -438,24 +438,36 @@ async function extractPageFeatures(
   imageBase64: string,
   apiKey: string
 ): Promise<{ profile: HandwritingProfile | null; is_handwritten: boolean }> {
-  console.log(`Extracting features for page ${pageNumber} with ${EXTRACTION_ATTEMPTS} attempts...`);
+  console.log(`Extracting features for page ${pageNumber} with ${EXTRACTION_ATTEMPTS} parallel attempts...`);
 
   const successfulProfiles: HandwritingProfile[] = [];
   let nonHandwrittenVotes = 0;
 
-  for (let attempt = 1; attempt <= EXTRACTION_ATTEMPTS; attempt++) {
-    const result = await extractPageFeaturesOnce(pageNumber, imageBase64, apiKey);
+  // Run the consensus attempts concurrently — they are independent and this cuts
+  // per-page latency roughly 3x compared to the previous sequential loop.
+  const settled = await Promise.allSettled(
+    Array.from({ length: EXTRACTION_ATTEMPTS }, () =>
+      extractPageFeaturesOnce(pageNumber, imageBase64, apiKey)
+    )
+  );
 
-    if (!result.is_handwritten) {
-      nonHandwrittenVotes++;
+  for (const [index, outcome] of settled.entries()) {
+    if (outcome.status !== 'fulfilled') {
+      console.error(`Page ${pageNumber}: attempt ${index + 1} threw`, outcome.reason);
+      continue;
     }
-
-    if (result.profile) {
-      successfulProfiles.push(result.profile);
-    }
-
-    console.log(`Page ${pageNumber}: extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} -> ${result.profile ? 'ok' : 'failed'}, handwritten=${result.is_handwritten}`);
+    const result = outcome.value;
+    if (!result.is_handwritten) nonHandwrittenVotes++;
+    if (result.profile) successfulProfiles.push(result.profile);
+    console.log(`Page ${pageNumber}: attempt ${index + 1}/${EXTRACTION_ATTEMPTS} -> ${result.profile ? 'ok' : 'failed'}, handwritten=${result.is_handwritten}`);
   }
+
+  // If every attempt threw (rate limit / gateway outage), surface it to the caller
+  // so the submission gets the correct fallback instead of a silent 50%.
+  if (settled.every((s) => s.status === 'rejected')) {
+    throw (settled[0] as PromiseRejectedResult).reason;
+  }
+
 
   if (nonHandwrittenVotes >= 2) {
     return { profile: null, is_handwritten: false };
@@ -912,62 +924,77 @@ serve(async (req) => {
     let overallEvidenceStrength = 'weak';
     let lastComparisonResult: WeightedComparisonResult | null = null;
 
-    for (let i = 0; i < imageUrls.length; i++) {
-      const pageUrl = imageUrls[i];
-      const pageNum = i + 1;
-      
-      console.log(`Processing page ${pageNum}/${imageUrls.length}...`);
+    // Pages are independent — process them concurrently (bounded) so a 5-page
+    // submission no longer takes 5x a single-page one.
+    const PAGE_CONCURRENCY = 3;
 
+    const processPage = async (
+      pageUrl: string,
+      pageNum: number
+    ): Promise<{ result: PageResult; comparison: WeightedComparisonResult | null }> => {
+      console.log(`Processing page ${pageNum}/${imageUrls.length}...`);
       try {
-        const { base64: pageBase64, size: pageSize } = await fetchImageAsBase64(pageUrl, supabase);
+        const { base64: pageBase64 } = await fetchImageAsBase64(pageUrl, supabase);
 
         if (pageBase64.length > MAX_BASE64_SIZE) {
-          pageResults.push({ page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' });
-          continue;
+          return { result: { page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' }, comparison: null };
         }
 
         // Stage 1: Extract features from submission page
         const { profile: submissionProfile, is_handwritten } = await extractPageFeatures(pageNum, pageBase64, LOVABLE_API_KEY);
 
         if (!is_handwritten) {
-          hasTypedContent = true;
-          pageResults.push({ page: pageNum, similarity: 0, same_writer: false, is_handwritten: false, confidence: 'high' });
-          continue;
+          return { result: { page: pageNum, similarity: 0, same_writer: false, is_handwritten: false, confidence: 'high' }, comparison: null };
         }
 
         if (!submissionProfile) {
-          pageResults.push({ page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' });
-          continue;
+          return { result: { page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' }, comparison: null };
         }
 
         // Stage 2: Weighted deterministic comparison
         const comparison = compareProfilesWeighted(referenceProfile, submissionProfile, weightMap);
-        lastComparisonResult = comparison;
+        const confidenceStr = comparison.confidence_level >= 0.7 ? 'high'
+          : comparison.confidence_level >= 0.4 ? 'medium' : 'low';
 
+        return {
+          result: {
+            page: pageNum,
+            similarity: comparison.similarity_score,
+            same_writer: comparison.same_writer,
+            is_handwritten: true,
+            confidence: confidenceStr,
+          },
+          comparison,
+        };
+      } catch (pageError: any) {
+        console.error(`Error processing page ${pageNum}:`, pageError);
+        return { result: { page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' }, comparison: null };
+      }
+    };
+
+    const processed: Array<{ result: PageResult; comparison: WeightedComparisonResult | null }> = [];
+    for (let start = 0; start < imageUrls.length; start += PAGE_CONCURRENCY) {
+      const batch = imageUrls.slice(start, start + PAGE_CONCURRENCY);
+      const batchResults = await Promise.all(
+        batch.map((url: string, offset: number) => processPage(url, start + offset + 1))
+      );
+      processed.push(...batchResults);
+    }
+
+    for (const { result, comparison } of processed) {
+      pageResults.push(result);
+      if (!result.is_handwritten) hasTypedContent = true;
+      if (comparison) {
+        lastComparisonResult = comparison;
         totalRareMatches += comparison.rare_feature_matches;
         totalCommonMatches += comparison.common_feature_matches;
         if (comparison.evidence_strength === 'very_strong' || comparison.evidence_strength === 'strong') {
           overallEvidenceStrength = comparison.evidence_strength;
         }
-
-        const confidenceStr = comparison.confidence_level >= 0.7 ? 'high' 
-          : comparison.confidence_level >= 0.4 ? 'medium' : 'low';
-
-        pageResults.push({
-          page: pageNum,
-          similarity: comparison.similarity_score,
-          same_writer: comparison.same_writer,
-          is_handwritten: true,
-          confidence: confidenceStr,
-        });
-
         if (!comparison.same_writer) hasDifferentWriter = true;
-
-      } catch (pageError: any) {
-        console.error(`Error processing page ${pageNum}:`, pageError);
-        pageResults.push({ page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' });
       }
     }
+
 
     // Robust multi-page aggregation:
     // Use weighted average (penalizing outliers) instead of pure minimum
