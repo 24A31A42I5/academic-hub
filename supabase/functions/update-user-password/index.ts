@@ -36,11 +36,30 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: roleData } = await supabaseAdmin
-      .from("user_roles").select("role").eq("user_id", user.id).single();
+    const { data: roleData, error: roleError } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-    if (roleData?.role !== "admin") {
-      console.error("User role check failed. User ID:", user.id, "Role:", roleData?.role);
+    const { data: profileData, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("role")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (roleError) {
+      console.warn("user_roles lookup warning:", roleError.message);
+    }
+
+    if (profileError) {
+      console.warn("profiles lookup warning:", profileError.message);
+    }
+
+    const isAdmin = roleData?.role === "admin" || profileData?.role === "admin";
+
+    if (!isAdmin) {
+      console.error("User role check failed. User ID:", user.id, "user_roles role:", roleData?.role, "profiles role:", profileData?.role);
       return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -57,24 +76,21 @@ serve(async (req: Request) => {
       });
     }
 
-    // Use the REST API to update the user's password
-    const updateResponse = await fetch(
-      `${supabaseUrl}/auth/v1/admin/users/${user_id}`,
-      {
-        method: "PUT",
-        headers: {
-          "Authorization": `Bearer ${supabaseServiceKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ password: normalizedPassword }),
-      }
+    const { data: updatedUser, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+      user_id,
+      { password: normalizedPassword }
     );
 
-    const updateData = await updateResponse.json();
+    if (updateError) {
+      console.error("Password update error:", updateError.message);
+      return new Response(JSON.stringify({ error: "Failed to update password", details: updateError.message }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    if (!updateResponse.ok) {
-      console.error("Password update error:", updateResponse.status, updateData);
-      return new Response(JSON.stringify({ error: "Failed to update password", details: updateData }), {
+    if (!updatedUser?.user) {
+      console.error("Password update returned no user for user_id:", user_id);
+      return new Response(JSON.stringify({ error: "Failed to update password" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

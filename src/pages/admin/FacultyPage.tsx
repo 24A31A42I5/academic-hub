@@ -21,7 +21,7 @@ const navItems = [
   { label: 'Students', href: '/admin/students', icon: DashboardIcons.GraduationCap },
   { label: 'Faculty', href: '/admin/faculty', icon: DashboardIcons.Users },
   { label: 'Assignments', href: '/admin/assignments', icon: DashboardIcons.BookOpen },
-  { label: 'Fraud Reports', href: '/admin/fraud', icon: DashboardIcons.AlertTriangle },
+  { label: 'Fraud Reports', href: '/admin/verification-reports', icon: DashboardIcons.AlertTriangle },
   { label: 'Section Mapping', href: '/admin/sections', icon: DashboardIcons.Settings },
 ];
 
@@ -45,6 +45,8 @@ interface ParsedFaculty {
   faculty_id: string;
 }
 
+const DEFAULT_FACULTY_PASSWORD = 'king@1234';
+
 const FacultyPage = () => {
   const { profile, loading: authLoading } = useAuth();
   const [faculty, setFaculty] = useState<Faculty[]>([]);
@@ -58,7 +60,7 @@ const FacultyPage = () => {
   
   // Single registration
   const [showSingleForm, setShowSingleForm] = useState(false);
-  const [singleFaculty, setSingleFaculty] = useState({ full_name: '', email: '', password: '', faculty_id: '' });
+  const [singleFaculty, setSingleFaculty] = useState({ full_name: '', email: '', password: DEFAULT_FACULTY_PASSWORD, faculty_id: '' });
   const [creatingOne, setCreatingOne] = useState(false);
 
   // Edit dialog
@@ -115,12 +117,12 @@ const FacultyPage = () => {
       const parsed: ParsedFaculty[] = jsonData.map((row) => ({
         full_name: row['Name'] || row['name'] || row['Full Name'] || row['full_name'] || '',
         email: row['Email'] || row['email'] || row['Mail'] || row['mail'] || '',
-        password: row['Password'] || row['password'] || '',
+        password: row['Password'] || row['password'] || DEFAULT_FACULTY_PASSWORD,
         faculty_id: row['Faculty ID'] || row['faculty_id'] || row['ID'] || row['id'] || '',
-      })).filter(f => f.full_name && f.email && f.password && f.faculty_id);
+      })).filter(f => f.full_name && f.email && f.faculty_id);
 
       if (parsed.length === 0) {
-        toast.error('No valid faculty data found. Ensure columns: Name, Email, Password, Faculty ID');
+        toast.error('No valid faculty data found. Ensure columns: Name, Email, Faculty ID');
         return;
       }
 
@@ -164,7 +166,7 @@ const FacultyPage = () => {
   };
 
   const handleSingleCreate = async () => {
-    if (!singleFaculty.full_name || !singleFaculty.email || !singleFaculty.password || !singleFaculty.faculty_id) {
+    if (!singleFaculty.full_name || !singleFaculty.email || !singleFaculty.faculty_id) {
       toast.error('Please fill all fields');
       return;
     }
@@ -181,7 +183,7 @@ const FacultyPage = () => {
       
       if (results.success.length > 0) {
         toast.success('Faculty account created successfully');
-        setSingleFaculty({ full_name: '', email: '', password: '', faculty_id: '' });
+        setSingleFaculty({ full_name: '', email: '', password: DEFAULT_FACULTY_PASSWORD, faculty_id: '' });
         setShowSingleForm(false);
         fetchFaculty();
       } else {
@@ -198,8 +200,8 @@ const FacultyPage = () => {
   const downloadTemplate = async () => {
     const XLSX = await import('xlsx');
     const template = [
-      { Name: 'Dr. John Smith', Email: 'john.smith@college.edu', Password: 'Faculty@123', 'Faculty ID': 'FAC001' },
-      { Name: 'Dr. Jane Doe', Email: 'jane.doe@college.edu', Password: 'Faculty@456', 'Faculty ID': 'FAC002' },
+      { Name: 'Dr. John Smith', Email: 'john.smith@college.edu', Password: DEFAULT_FACULTY_PASSWORD, 'Faculty ID': 'FAC001' },
+      { Name: 'Dr. Jane Doe', Email: 'jane.doe@college.edu', Password: DEFAULT_FACULTY_PASSWORD, 'Faculty ID': 'FAC002' },
     ];
     const ws = XLSX.utils.json_to_sheet(template);
     const wb = XLSX.utils.book_new();
@@ -357,7 +359,7 @@ const FacultyPage = () => {
                   type="text"
                   value={singleFaculty.password}
                   onChange={(e) => setSingleFaculty({ ...singleFaculty, password: e.target.value })}
-                  placeholder="Faculty@123"
+                  placeholder={DEFAULT_FACULTY_PASSWORD}
                 />
               </div>
               <div>
@@ -388,7 +390,7 @@ const FacultyPage = () => {
             Bulk Faculty Registration
           </CardTitle>
           <CardDescription>
-            Excel file must have columns: <strong>Name, Email, Password, Faculty ID</strong>
+            Excel file must have columns: <strong>Name, Email, Faculty ID</strong>. Password is optional and defaults to <strong>{DEFAULT_FACULTY_PASSWORD}</strong>.
           </CardDescription>
         </CardHeader>
         <CardContent>

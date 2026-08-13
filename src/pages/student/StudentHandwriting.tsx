@@ -107,46 +107,123 @@ const StudentHandwriting = () => {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
-  // Strip EXIF data by re-encoding the image
-  const stripExifData = async (file: File): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-      const img = document.createElement('img');
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const objectUrl = URL.createObjectURL(file);
-
-      img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx?.drawImage(img, 0, 0);
-        URL.revokeObjectURL(objectUrl);
-        
-        canvas.toBlob((blob) => {
-          if (blob) {
-            resolve(blob);
-          } else {
-            reject(new Error('Failed to process image'));
+  // Materialize file bytes immediately to keep gallery-selected content stable on mobile browsers.
+  const materializeFile = async (file: File): Promise<Blob> => {
+    try {
+      const buf = await file.arrayBuffer();
+      return new Blob([buf], { type: file.type || 'image/jpeg' });
+    } catch (e) {
+      console.warn('arrayBuffer() failed, falling back to FileReader', e);
+      try {
+        return await new Promise<Blob>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(new Blob([reader.result as ArrayBuffer], { type: file.type || 'image/jpeg' }));
+          reader.onerror = () => reject(new Error(`Could not read "${file.name}" from your device.`));
+          reader.readAsArrayBuffer(file);
+        });
+      } catch (readerError) {
+        console.warn('FileReader failed, falling back to object URL fetch', readerError);
+        const tempUrl = URL.createObjectURL(file);
+        try {
+          const response = await fetch(tempUrl);
+          if (!response.ok) {
+            throw new Error(`Could not access "${file.name}" from your gallery.`);
           }
-        }, 'image/jpeg', 0.95);
-      };
+          const blob = await response.blob();
+          return new Blob([blob], { type: blob.type || file.type || 'image/jpeg' });
+        } finally {
+          URL.revokeObjectURL(tempUrl);
+        }
+      }
+    }
+  };
 
+  const decodeBlobToCanvasSource = async (
+    blob: Blob,
+    fileName: string,
+  ): Promise<{ source: CanvasImageSource; width: number; height: number; cleanup: () => void }> => {
+    if (typeof createImageBitmap === 'function') {
+      try {
+        let bitmap: ImageBitmap;
+        try {
+          bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' } as ImageBitmapOptions);
+        } catch {
+          bitmap = await createImageBitmap(blob);
+        }
+        return {
+          source: bitmap,
+          width: bitmap.width,
+          height: bitmap.height,
+          cleanup: () => bitmap.close?.(),
+        };
+      } catch (e) {
+        console.warn('createImageBitmap failed, falling back to <img>', e);
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(blob);
+      const img = new window.Image();
+      img.decoding = 'async';
+      img.onload = () => {
+        resolve({
+          source: img,
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+          cleanup: () => URL.revokeObjectURL(objectUrl),
+        });
+      };
       img.onerror = () => {
         URL.revokeObjectURL(objectUrl);
-        reject(new Error('Failed to load image'));
+        reject(new Error(`Could not decode "${fileName}". Please select a clearer JPG/PNG image.`));
       };
       img.src = objectUrl;
     });
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Strip EXIF data by decoding to pixels then re-encoding to JPEG.
+  const stripExifData = async (file: File): Promise<Blob> => {
+    const stableBlob = await materializeFile(file);
+    const { source, width, height, cleanup } = await decodeBlobToCanvasSource(stableBlob, file.name);
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      if (!ctx) {
+        throw new Error('Failed to process image on this device');
+      }
+
+      ctx.drawImage(source, 0, 0, width, height);
+
+      const outputBlob: Blob | null = await new Promise((resolve) => {
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.95);
+      });
+
+      canvas.width = 0;
+      canvas.height = 0;
+
+      if (!outputBlob) {
+        throw new Error('Failed to process selected image');
+      }
+
+      return outputBlob;
+    } finally {
+      cleanup();
+    }
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     // Validate file type (some mobile browsers omit MIME types -> fall back to extension)
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
-    const hasValidExtension = /\.(jpe?g|png|webp)$/i.test(file.name);
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp', 'image/heic', 'image/heif'];
+    const hasValidExtension = /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name);
     if (!(file.type ? allowedTypes.includes(file.type) : hasValidExtension)) {
-      toast.error('Please upload an image file (JPG, PNG, or WebP)');
+      toast.error('Please upload an image file (JPG, PNG, WebP, HEIC, or HEIF)');
       return;
     }
 
@@ -156,9 +233,21 @@ const StudentHandwriting = () => {
       return;
     }
 
-    setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
-    setShowConfirmDialog(true);
+    try {
+      // Keep a stable in-memory copy so phone gallery handles do not expire.
+      const stableBlob = await materializeFile(file);
+      const stableFile = new File([stableBlob], file.name || `handwriting-${Date.now()}.jpg`, {
+        type: stableBlob.type || file.type || 'image/jpeg',
+        lastModified: Date.now(),
+      });
+
+      setSelectedFile(stableFile);
+      setPreviewUrl(URL.createObjectURL(stableFile));
+      setShowConfirmDialog(true);
+    } catch (e) {
+      console.error('Failed to prepare handwriting image:', e);
+      toast.error('Cannot access selected image from gallery. Please choose it again and retry.');
+    }
   };
 
 
@@ -529,7 +618,7 @@ const StudentHandwriting = () => {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/jpg,image/webp"
+                    accept="image/*,.jpg,.jpeg,.png,.webp,.heic,.heif"
                     onChange={handleFileSelect}
                     className="hidden"
                     id="handwriting-upload"

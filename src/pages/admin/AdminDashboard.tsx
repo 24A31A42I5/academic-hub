@@ -14,7 +14,7 @@ const navItems = [
   { label: 'Students', href: '/admin/students', icon: DashboardIcons.GraduationCap },
   { label: 'Faculty', href: '/admin/faculty', icon: DashboardIcons.Users },
   { label: 'Assignments', href: '/admin/assignments', icon: DashboardIcons.BookOpen },
-  { label: 'Fraud Reports', href: '/admin/fraud', icon: DashboardIcons.AlertTriangle },
+  { label: 'Fraud Reports', href: '/admin/verification-reports', icon: DashboardIcons.AlertTriangle },
   { label: 'Section Mapping', href: '/admin/sections', icon: DashboardIcons.Settings },
 ];
 

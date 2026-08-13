@@ -18,7 +18,7 @@ const VERIFICATION_THRESHOLDS = {
   REUPLOAD: 0
 };
 
-const MAX_BASE64_SIZE = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 interface PageResult {
   page: number;
@@ -668,6 +668,8 @@ async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64:
         .createSignedUrl(filePath, 300);
       if (signedError) throw new Error(`Failed to access file: ${signedError.message}`);
       url = signedData.signedUrl;
+    } else {
+      throw new Error('Invalid submission file URL. Only uploads bucket files are allowed.');
     }
   }
   
@@ -833,11 +835,20 @@ serve(async (req) => {
       .eq('id', student_profile_id)
       .single();
 
+    if (!studentProfile?.user_id) {
+      throw new Error('Student profile not found for submission ownership check');
+    }
+
     for (const path of imageUrls) {
       const storagePath = path.startsWith('http')
-        ? path.split('/uploads/')[1]?.split('?')[0]
+        ? path.match(/\/storage\/v1\/object\/(?:public|sign)\/uploads\/(.+?)(\?.*)?$/)?.[1]
         : path;
-      if (storagePath && !storagePath.startsWith(studentProfile!.user_id + '/')) {
+
+      if (!storagePath) {
+        throw new Error('Invalid submission file path format');
+      }
+
+      if (!storagePath.startsWith(studentProfile.user_id + '/')) {
         throw new Error(`Access denied: file path does not belong to student`);
       }
     }
@@ -934,9 +945,9 @@ serve(async (req) => {
     ): Promise<{ result: PageResult; comparison: WeightedComparisonResult | null }> => {
       console.log(`Processing page ${pageNum}/${imageUrls.length}...`);
       try {
-        const { base64: pageBase64 } = await fetchImageAsBase64(pageUrl, supabase);
+        const { base64: pageBase64, size: pageBytes } = await fetchImageAsBase64(pageUrl, supabase);
 
-        if (pageBase64.length > MAX_BASE64_SIZE) {
+        if (pageBytes > MAX_IMAGE_BYTES) {
           return { result: { page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' }, comparison: null };
         }
 

@@ -38,7 +38,7 @@ interface SelectedImage {
   id: string;
 }
 
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per image
 const MAX_IMAGES = 20;
 
@@ -109,10 +109,10 @@ const SubmitAssignment = () => {
 
   const validateImageFile = (file: File): string | null => {
     const ext = (file.name.split('.').pop() ?? '').toLowerCase();
-    const isValidType = ACCEPTED_IMAGE_TYPES.includes(file.type) || ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+    const isValidType = ACCEPTED_IMAGE_TYPES.includes(file.type) || ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(ext);
 
     if (!isValidType) {
-      return `"${file.name}" is not a supported image format. Use JPG, PNG, or WEBP.`;
+      return `"${file.name}" is not a supported image format. Use JPG, PNG, WEBP, HEIC, or HEIF.`;
     }
     if (file.size > MAX_FILE_SIZE) {
       return `"${file.name}" exceeds 10MB. Please compress it before uploading.`;
@@ -162,17 +162,39 @@ const SubmitAssignment = () => {
       return new Blob([buf], { type });
     } catch (e) {
       console.warn('arrayBuffer() failed, falling back to FileReader', e);
-      return new Promise<Blob>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as ArrayBuffer;
-          resolve(new Blob([result], { type: file.type || 'image/jpeg' }));
-        };
-        reader.onerror = () =>
-          reject(new Error(`Could not read "${file.name}" from your device.`));
-        reader.readAsArrayBuffer(file);
-      });
+      try {
+        return await new Promise<Blob>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as ArrayBuffer;
+            resolve(new Blob([result], { type: file.type || 'image/jpeg' }));
+          };
+          reader.onerror = () =>
+            reject(new Error(`Could not read "${file.name}" from your device.`));
+          reader.readAsArrayBuffer(file);
+        });
+      } catch (readerError) {
+        console.warn('FileReader failed, falling back to object URL fetch', readerError);
+        const tempUrl = URL.createObjectURL(file);
+        try {
+          const response = await fetch(tempUrl);
+          if (!response.ok) {
+            throw new Error(`Could not access "${file.name}" from your gallery.`);
+          }
+          const blob = await response.blob();
+          return new Blob([blob], { type: blob.type || file.type || 'image/jpeg' });
+        } finally {
+          URL.revokeObjectURL(tempUrl);
+        }
+      }
     }
+  };
+
+  const snapshotFileForUpload = async (file: File): Promise<File> => {
+    const blob = await materializeFile(file);
+    const name = file.name || `page-${Date.now()}.jpg`;
+    const type = blob.type || file.type || 'image/jpeg';
+    return new File([blob], name, { type, lastModified: Date.now() });
   };
 
   const decodeBlobToBitmapOrImg = async (
@@ -236,7 +258,7 @@ const SubmitAssignment = () => {
     }
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
@@ -249,18 +271,25 @@ const SubmitAssignment = () => {
       return;
     }
 
-    Array.from(files).forEach(file => {
+    for (const file of Array.from(files)) {
       const error = validateImageFile(file);
       if (error) {
         errors.push(error);
       } else {
-        newImages.push({
-          file,
-          preview: URL.createObjectURL(file),
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        });
+        try {
+          // Snapshot bytes immediately to avoid Android gallery content handles expiring before submit.
+          const stableFile = await snapshotFileForUpload(file);
+          newImages.push({
+            file: stableFile,
+            preview: URL.createObjectURL(stableFile),
+            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          });
+        } catch (snapshotError) {
+          console.error('Failed to prepare image for upload:', snapshotError);
+          errors.push(`Could not access "${file.name}" from gallery. Please reselect the image and try again.`);
+        }
       }
-    });
+    }
 
     if (errors.length > 0) {
       errors.forEach(err => toast.error(err));
@@ -666,7 +695,7 @@ const SubmitAssignment = () => {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                  accept="image/*,.jpg,.jpeg,.png,.webp,.heic,.heif"
                   multiple
                   onChange={handleFileSelect}
                   className="hidden"
@@ -690,7 +719,7 @@ const SubmitAssignment = () => {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                accept="image/*,.jpg,.jpeg,.png,.webp,.heic,.heif"
                 multiple
                 onChange={handleFileSelect}
                 className="hidden"

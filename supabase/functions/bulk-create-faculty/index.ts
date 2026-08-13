@@ -27,6 +27,16 @@ interface BulkCreateRequest {
   faculty: FacultyData[];
 }
 
+const DEFAULT_FACULTY_PASSWORD = "king@1234";
+
+const normalizeFacultyPassword = (password?: string): string => {
+  const candidate = (password ?? "").trim();
+  if (!candidate || candidate.length < 8) {
+    return DEFAULT_FACULTY_PASSWORD;
+  }
+  return candidate;
+};
+
 serve(async (req: Request) => {
   const origin = req.headers.get("origin");
   const corsHeaders = getCorsHeaders(origin);
@@ -101,15 +111,17 @@ serve(async (req: Request) => {
 
     for (const f of faculty) {
       try {
-        if (!f.email || !f.full_name || !f.faculty_id || !f.password) {
+        if (!f.email || !f.full_name || !f.faculty_id) {
           results.failed.push({ email: f.email || "unknown", error: "Missing required fields" });
           continue;
         }
 
+        const effectivePassword = normalizeFacultyPassword(f.password);
+
         // Create user
         const { data: authData, error: createError } = await supabaseAdmin.auth.admin.createUser({
           email: f.email,
-          password: f.password,
+          password: effectivePassword,
           email_confirm: true,
           user_metadata: {
             full_name: f.full_name,

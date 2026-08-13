@@ -22,7 +22,7 @@ const navItems = [
   { label: 'Faculty', href: '/admin/faculty', icon: DashboardIcons.Users },
   { label: 'Assignments', href: '/admin/assignments', icon: DashboardIcons.BookOpen },
   { label: 'Handwriting', href: '/admin/handwriting', icon: DashboardIcons.FileText },
-  { label: 'Fraud Reports', href: '/admin/fraud', icon: DashboardIcons.AlertTriangle },
+  { label: 'Fraud Reports', href: '/admin/verification-reports', icon: DashboardIcons.AlertTriangle },
   { label: 'Section Mapping', href: '/admin/sections', icon: DashboardIcons.Settings },
 ];
 
