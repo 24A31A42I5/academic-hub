@@ -351,83 +351,94 @@ serve(async (req) => {
     }
     console.log('Image fetched, base64 length:', imageBase64.length);
 
-    console.log(`Calling Gemini AI for strict enum extraction (${EXTRACTION_ATTEMPTS} attempts)...`);
+    console.log(`Calling Gemini AI for strict enum extraction (${EXTRACTION_ATTEMPTS} parallel attempts)...`);
 
     const extractedProfiles: any[] = [];
     let nonHandwrittenVotes = 0;
 
-    for (let attempt = 1; attempt <= EXTRACTION_ATTEMPTS; attempt++) {
-      try {
-        const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
-            temperature: 0,
-            top_p: 0.1,
-            response_format: { type: 'json_object' },
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: EXTRACTION_PROMPT },
-                  {
-                    type: 'image_url',
-                    image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
-                  }
-                ]
-              }
-            ],
-          }),
-        });
+    const runAttempt = async (attempt: number) => {
+      const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          temperature: 0,
+          top_p: 0.1,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: EXTRACTION_PROMPT },
+                {
+                  type: 'image_url',
+                  image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
+                }
+              ]
+            }
+          ],
+        }),
+      });
 
-        if (!aiResponse.ok) {
-          const errorText = await aiResponse.text();
-          console.error('AI Gateway error:', aiResponse.status, errorText);
-          if (aiResponse.status === 429) throw new Error('Rate limit exceeded. Please try again later.');
-          if (aiResponse.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
-          throw new Error(`AI analysis failed: ${aiResponse.status}`);
-        }
-
-        const aiData = await aiResponse.json();
-        const responseText = aiData.choices?.[0]?.message?.content || '';
-        console.log(`Gemini response attempt ${attempt}/${EXTRACTION_ATTEMPTS}, length:`, responseText.length);
-
-        const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          console.error(`No JSON found in attempt ${attempt}`);
-          continue;
-        }
-
-        const parsed = JSON.parse(jsonMatch[0]);
-
-        if (parsed.is_handwritten === false) {
-          nonHandwrittenVotes++;
-        }
-
-        // Validate strict enum values
-        if (!validateProfile(parsed)) {
-          console.error(`Strict enum validation failed for attempt ${attempt}`);
-          continue;
-        }
-
-        // Ensure confidence_level is a number in range
-        if (typeof parsed.confidence_level !== 'number') {
-          parsed.confidence_level = 0.5;
-        } else {
-          parsed.confidence_level = Math.max(0, Math.min(1, parsed.confidence_level));
-        }
-
-        extractedProfiles.push(parsed);
-        console.log(`Extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} succeeded`);
-      } catch (attemptError) {
-        console.error(`Extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} failed:`, attemptError);
+      if (!aiResponse.ok) {
+        const errorText = await aiResponse.text();
+        console.error('AI Gateway error:', aiResponse.status, errorText);
+        if (aiResponse.status === 429) throw new Error('Rate limit exceeded. Please try again later.');
+        if (aiResponse.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
+        throw new Error(`AI analysis failed: ${aiResponse.status}`);
       }
+
+      const aiData = await aiResponse.json();
+      const responseText = aiData.choices?.[0]?.message?.content || '';
+      console.log(`Gemini response attempt ${attempt}/${EXTRACTION_ATTEMPTS}, length:`, responseText.length);
+
+      const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error(`No JSON found in attempt ${attempt}`);
+        return null;
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      if (typeof parsed.confidence_level !== 'number') {
+        parsed.confidence_level = 0.5;
+      } else {
+        parsed.confidence_level = Math.max(0, Math.min(1, parsed.confidence_level));
+      }
+
+      return parsed;
+    };
+
+    // Run the three consensus passes concurrently — ~3x faster training.
+    const settled = await Promise.allSettled(
+      Array.from({ length: EXTRACTION_ATTEMPTS }, (_, i) => runAttempt(i + 1))
+    );
+
+    if (settled.every((s) => s.status === 'rejected')) {
+      throw (settled[0] as PromiseRejectedResult).reason;
     }
+
+    settled.forEach((outcome, index) => {
+      if (outcome.status !== 'fulfilled' || !outcome.value) {
+        if (outcome.status === 'rejected') {
+          console.error(`Extraction attempt ${index + 1}/${EXTRACTION_ATTEMPTS} failed:`, outcome.reason);
+        }
+        return;
+      }
+      const parsed = outcome.value;
+      if (parsed.is_handwritten === false) nonHandwrittenVotes++;
+      if (!validateProfile(parsed)) {
+        console.error(`Strict enum validation failed for attempt ${index + 1}`);
+        return;
+      }
+      extractedProfiles.push(parsed);
+      console.log(`Extraction attempt ${index + 1}/${EXTRACTION_ATTEMPTS} succeeded`);
+    });
+
 
     if (nonHandwrittenVotes >= 2) {
       throw new Error('Uploaded sample appears typed/printed instead of handwritten');
