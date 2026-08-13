@@ -417,7 +417,7 @@ async function extractPageFeaturesOnce(
   const aiData = await aiResponse.json();
   const responseText = aiData.choices?.[0]?.message?.content || '';
 
-  let cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     return { profile: null, is_handwritten: true };

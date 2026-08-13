@@ -63,6 +63,15 @@ interface BulkCreateRequest {
   students: StudentData[];
 }
 
+const DEFAULT_STUDENT_PASSWORD = "king@1234";
+
+const normalizeStudentPassword = (password?: string): string => {
+  const candidate = (password ?? "").trim();
+  if (!candidate) return DEFAULT_STUDENT_PASSWORD;
+  if (candidate.length >= 8) return candidate;
+  return DEFAULT_STUDENT_PASSWORD;
+};
+
 // Validate password strength
 const isStrongPassword = (password: string): boolean => {
   return (
@@ -179,15 +188,14 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // Use provided password, or generate a unique secure one per student
-        const password = student.password && isStrongPassword(student.password)
-          ? student.password
-          : generateSecurePassword();
+        // Use the project default password unless a valid strong password is intentionally supplied.
+        const password = normalizeStudentPassword(student.password);
+        const effectivePassword = isStrongPassword(password) ? password : DEFAULT_STUDENT_PASSWORD;
 
         // Create user in auth
         const { data: authData, error: createError } = await supabaseAdmin.auth.admin.createUser({
           email: student.email,
-          password: password,
+          password: effectivePassword,
           email_confirm: true,
           user_metadata: {
             full_name: student.full_name,

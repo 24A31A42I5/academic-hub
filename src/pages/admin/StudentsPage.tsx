@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Loader2, Upload, Search, Users, CheckCircle, XCircle, FileSpreadsheet, Download, Pencil, Trash2, RotateCcw, FileEdit } from 'lucide-react';
+import { Loader2, Upload, Search, Users, CheckCircle, XCircle, FileSpreadsheet, Download, Pencil, Trash2, RotateCcw, FileEdit, KeyRound } from 'lucide-react';
 // xlsx is dynamic-imported on demand (file parse / template download) to keep it out of the initial bundle
 import { logger } from '@/lib/logger';
 
@@ -30,6 +30,7 @@ const BRANCHES = ['CSE', 'AIML', 'AI', 'DS', 'IT', 'ECE', 'EEE', 'MECH', 'CIVIL'
 const YEARS = [1, 2, 3, 4];
 const SECTIONS = ['A', 'B', 'C'];
 const SEMESTERS = ['I', 'II'];
+const DEFAULT_STUDENT_PASSWORD = 'king@1234';
 
 interface StudentDetails {
   roll_number: string;
@@ -95,6 +96,7 @@ const StudentsPage = () => {
   const [editForm, setEditForm] = useState({ full_name: '', email: '', phone_number: '', year: '', branch: '', section: '', semester: '', roll_number: '', password: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [resettingPassword, setResettingPassword] = useState<string | null>(null);
 
   const fetchStudents = useCallback(async () => {
     try {
@@ -157,10 +159,10 @@ const StudentsPage = () => {
       const parsed: ParsedStudent[] = jsonData.map((row) => ({
         full_name: row['Name'] || row['name'] || row['Full Name'] || row['full_name'] || '',
         email: row['Email'] || row['email'] || row['Mail'] || row['mail'] || '',
-        password: row['Password'] || row['password'] || '',
+        password: row['Password'] || row['password'] || DEFAULT_STUDENT_PASSWORD,
         roll_number: row['Roll Number'] || row['roll_number'] || row['Roll'] || row['roll'] || '',
         phone_number: row['Phone Number'] || row['phone_number'] || row['Phone'] || row['phone'] || row['Mobile'] || row['mobile'] || '',
-      })).filter(s => s.full_name && s.email && s.roll_number && s.password);
+      })).filter(s => s.full_name && s.email && s.roll_number);
 
       if (parsed.length === 0) {
         toast.error('No valid student data found. Ensure columns: Name, Email, Password, Roll Number, Phone Number');
@@ -229,8 +231,8 @@ const StudentsPage = () => {
   const downloadTemplate = async () => {
     const XLSX = await import('xlsx');
     const template = [
-      { Name: 'John Doe', Email: 'john@example.com', Password: 'Secure@Pass1', 'Roll Number': 'CS001', 'Phone Number': '9876543210' },
-      { Name: 'Jane Smith', Email: 'jane@example.com', Password: 'Strong#Pass2', 'Roll Number': 'CS002', 'Phone Number': '9876543211' },
+      { Name: 'John Doe', Email: 'john@example.com', Password: DEFAULT_STUDENT_PASSWORD, 'Roll Number': 'CS001', 'Phone Number': '9876543210' },
+      { Name: 'Jane Smith', Email: 'jane@example.com', Password: DEFAULT_STUDENT_PASSWORD, 'Roll Number': 'CS002', 'Phone Number': '9876543211' },
     ];
     const ws = XLSX.utils.json_to_sheet(template);
     const wb = XLSX.utils.book_new();
@@ -298,6 +300,7 @@ const StudentsPage = () => {
           body: { user_id: editStudent.user_id, password: editForm.password.trim() },
         });
         if (response.error) {
+          logger.error('Password update failed:', response.error);
           toast.error('Profile updated but password change failed');
           setSaving(false);
           return;
@@ -335,6 +338,24 @@ const StudentsPage = () => {
       toast.error('Failed to delete student');
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleResetPassword = async (student: Student) => {
+    setResettingPassword(student.id);
+    try {
+      const response = await invokeEdgeFunction('update-user-password', {
+        body: { user_id: student.user_id, password: DEFAULT_STUDENT_PASSWORD },
+      });
+
+      if (response.error) throw response.error;
+
+      toast.success(`Password reset for ${student.full_name}. New default password: ${DEFAULT_STUDENT_PASSWORD}`);
+    } catch (error) {
+      logger.error('Error resetting student password', error);
+      toast.error('Failed to reset student password');
+    } finally {
+      setResettingPassword(null);
     }
   };
 
@@ -853,6 +874,27 @@ const StudentsPage = () => {
                             <Button variant="ghost" size="icon" onClick={() => handleEdit(student)} title="Edit Student">
                               <Pencil className="w-4 h-4" />
                             </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="ghost" size="icon" className="text-blue-600 hover:text-blue-700" title="Reset Password" disabled={resettingPassword === student.id}>
+                                  {resettingPassword === student.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Reset Student Password</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Set the password for {student.full_name} back to the default value: {DEFAULT_STUDENT_PASSWORD}. Continue?
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleResetPassword(student)}>
+                                    Reset Password
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                             {details?.handwriting_url && (
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
