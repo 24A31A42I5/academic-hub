@@ -312,13 +312,17 @@ const SubmitAssignment = () => {
 
     setUploading(true);
     try {
-      const uploadedUrls: string[] = [];
       const timestamp = Date.now();
 
-      // Upload all images in order (normalized)
-      for (let i = 0; i < selectedImages.length; i++) {
-        const img = selectedImages[i];
-        const fileName = `${user.id}/${assignment.id}/page_${i + 1}_${timestamp}.jpg`;
+      // Normalize + upload pages with bounded concurrency so multi-page
+      // submissions (especially from phones) finish much faster, while keeping
+      // memory use safe on low-end devices. Page order is preserved.
+      const UPLOAD_CONCURRENCY = 2;
+      const uploadedUrls: string[] = new Array(selectedImages.length);
+
+      const uploadOne = async (index: number) => {
+        const img = selectedImages[index];
+        const fileName = `${user.id}/${assignment.id}/page_${index + 1}_${timestamp}.jpg`;
 
         // Normalize image for mobile compatibility
         const normalizedBlob = await normalizeImageFile(img.file);
@@ -334,8 +338,17 @@ const SubmitAssignment = () => {
         if (uploadError) throw uploadError;
 
         // Store the storage path (not public URL) for private bucket
-        uploadedUrls.push(fileName);
+        uploadedUrls[index] = fileName;
+      };
+
+      for (let start = 0; start < selectedImages.length; start += UPLOAD_CONCURRENCY) {
+        const batch = Array.from(
+          { length: Math.min(UPLOAD_CONCURRENCY, selectedImages.length - start) },
+          (_, offset) => start + offset
+        );
+        await Promise.all(batch.map(uploadOne));
       }
+
 
       // Check if deadline passed
       const isLate = isPast(new Date(assignment.deadline));
