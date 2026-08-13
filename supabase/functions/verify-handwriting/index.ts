@@ -438,24 +438,36 @@ async function extractPageFeatures(
   imageBase64: string,
   apiKey: string
 ): Promise<{ profile: HandwritingProfile | null; is_handwritten: boolean }> {
-  console.log(`Extracting features for page ${pageNumber} with ${EXTRACTION_ATTEMPTS} attempts...`);
+  console.log(`Extracting features for page ${pageNumber} with ${EXTRACTION_ATTEMPTS} parallel attempts...`);
 
   const successfulProfiles: HandwritingProfile[] = [];
   let nonHandwrittenVotes = 0;
 
-  for (let attempt = 1; attempt <= EXTRACTION_ATTEMPTS; attempt++) {
-    const result = await extractPageFeaturesOnce(pageNumber, imageBase64, apiKey);
+  // Run the consensus attempts concurrently — they are independent and this cuts
+  // per-page latency roughly 3x compared to the previous sequential loop.
+  const settled = await Promise.allSettled(
+    Array.from({ length: EXTRACTION_ATTEMPTS }, () =>
+      extractPageFeaturesOnce(pageNumber, imageBase64, apiKey)
+    )
+  );
 
-    if (!result.is_handwritten) {
-      nonHandwrittenVotes++;
+  for (const [index, outcome] of settled.entries()) {
+    if (outcome.status !== 'fulfilled') {
+      console.error(`Page ${pageNumber}: attempt ${index + 1} threw`, outcome.reason);
+      continue;
     }
-
-    if (result.profile) {
-      successfulProfiles.push(result.profile);
-    }
-
-    console.log(`Page ${pageNumber}: extraction attempt ${attempt}/${EXTRACTION_ATTEMPTS} -> ${result.profile ? 'ok' : 'failed'}, handwritten=${result.is_handwritten}`);
+    const result = outcome.value;
+    if (!result.is_handwritten) nonHandwrittenVotes++;
+    if (result.profile) successfulProfiles.push(result.profile);
+    console.log(`Page ${pageNumber}: attempt ${index + 1}/${EXTRACTION_ATTEMPTS} -> ${result.profile ? 'ok' : 'failed'}, handwritten=${result.is_handwritten}`);
   }
+
+  // If every attempt threw (rate limit / gateway outage), surface it to the caller
+  // so the submission gets the correct fallback instead of a silent 50%.
+  if (settled.every((s) => s.status === 'rejected')) {
+    throw (settled[0] as PromiseRejectedResult).reason;
+  }
+
 
   if (nonHandwrittenVotes >= 2) {
     return { profile: null, is_handwritten: false };
