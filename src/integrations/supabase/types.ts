@@ -425,6 +425,15 @@ export type Database = {
         Args: { _faculty_user_id: string; _profile_id: string }
         Returns: boolean
       }
+      faculty_owns_section: {
+        Args: {
+          _branch: string
+          _faculty_profile_id: string
+          _section: string
+          _year: number
+        }
+        Returns: boolean
+      }
       get_profile_id_for_user: { Args: { _user_id: string }; Returns: string }
       get_user_role: {
         Args: { _user_id: string }
