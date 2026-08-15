@@ -16,6 +16,30 @@ const isUnauthorized = (error: unknown) => {
 };
 
 /**
+ * supabase-js reports every non-2xx as the opaque "Edge Function returned a
+ * non-2xx status code". The real reason lives in the attached Response body, so
+ * read it and rewrite the message to something the user can act on.
+ */
+const withResolvedMessage = async (error: Error | null): Promise<Error | null> => {
+  if (!error) return null;
+  const context = (error as { context?: unknown }).context;
+  if (!(context instanceof Response)) return error;
+  try {
+    const body = await context.clone().json();
+    const detail = body?.error ?? body?.message;
+    if (typeof detail === 'string' && detail.trim()) {
+      const resolved = new Error(detail);
+      resolved.name = error.name;
+      return resolved;
+    }
+  } catch {
+    /* body was not JSON — keep the original message */
+  }
+  return error;
+};
+
+
+/**
  * Invokes a Supabase edge function with a guaranteed-fresh session.
  *
  * Stale or rotated refresh tokens make the gateway/function return 401
