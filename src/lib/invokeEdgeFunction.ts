@@ -62,8 +62,13 @@ export async function invokeEdgeFunction<T = any>(
   const first = await supabase.functions.invoke(name, options);
   if (!first.error) return { data: first.data as T, error: null };
 
-  if (!isUnauthorized(first.error)) {
-    return { data: first.data as T | null, error: first.error };
+  // The generic supabase-js message hides the status, so inspect the Response.
+  const firstStatus = (first.error as { context?: unknown }).context instanceof Response
+    ? ((first.error as { context: Response }).context).status
+    : undefined;
+
+  if (firstStatus !== 401 && !isUnauthorized(first.error)) {
+    return { data: first.data as T | null, error: await withResolvedMessage(first.error) };
   }
 
   logger.warn?.(`Edge function ${name} returned 401 — refreshing session and retrying`);
@@ -73,8 +78,15 @@ export async function invokeEdgeFunction<T = any>(
   }
 
   const second = await supabase.functions.invoke(name, options);
-  if (second.error && isUnauthorized(second.error)) {
-    return { data: null, error: new SessionExpiredError() };
+  if (second.error) {
+    const secondStatus = (second.error as { context?: unknown }).context instanceof Response
+      ? ((second.error as { context: Response }).context).status
+      : undefined;
+    if (secondStatus === 401 || isUnauthorized(second.error)) {
+      return { data: null, error: new SessionExpiredError() };
+    }
+    return { data: second.data as T | null, error: await withResolvedMessage(second.error) };
   }
-  return { data: second.data as T | null, error: second.error ?? null };
+  return { data: second.data as T | null, error: null };
+
 }
