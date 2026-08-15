@@ -44,8 +44,8 @@ interface SelectedImage {
   id: string;
 }
 
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per image
+// Image format/size rules are enforced by @/lib/imageProcessing.
+
 const MAX_IMAGES = 20;
 
 const SubmitAssignment = () => {
@@ -549,7 +549,7 @@ const SubmitAssignment = () => {
                   One image per handwritten page
                 </p>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Supported formats: JPG, PNG, WEBP (max 10MB each)
+                  Supported: JPG, PNG, WEBP, HEIC (iPhone) — max 30MB each
                 </p>
                 <input
                   ref={fileInputRef}
