@@ -295,17 +295,24 @@ const StudentsPage = () => {
 
       // Update password if provided
       if (editForm.password.trim()) {
-        const { data: sessionData } = await supabase.auth.getSession();
+        if (editForm.password.trim().length < 8) {
+          toast.error('Password must be at least 8 characters');
+          setSaving(false);
+          return;
+        }
         const response = await invokeEdgeFunction('update-user-password', {
           body: { user_id: editStudent.user_id, password: editForm.password.trim() },
         });
         if (response.error) {
           logger.error('Password update failed:', response.error);
-          toast.error('Profile updated but password change failed');
+          // Surface the real reason so the admin can act on it.
+          toast.error(`Profile saved, but password change failed: ${response.error.message}`);
           setSaving(false);
           return;
         }
+        toast.success('Password updated. The student can sign in with it now.');
       }
+
 
       toast.success('Student updated successfully');
       setEditStudent(null);
@@ -1020,8 +1027,28 @@ const StudentsPage = () => {
             </div>
             <div>
               <Label>New Password (leave blank to keep current)</Label>
-              <Input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Enter new password" />
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={editForm.password}
+                  onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                  placeholder="Enter new password"
+                  autoComplete="new-password"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditForm({ ...editForm, password: DEFAULT_STUDENT_PASSWORD })}
+                  title="Fill in the default student password"
+                >
+                  Use default
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Minimum 8 characters. "Use default" resets the account to the standard student password.
+              </p>
             </div>
+
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditStudent(null)}>Cancel</Button>

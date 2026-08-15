@@ -3,6 +3,12 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
+import {
+  validateImageFile,
+  snapshotFileForUpload,
+  normalizeImageFile,
+} from '@/lib/imageProcessing';
+
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -38,8 +44,8 @@ interface SelectedImage {
   id: string;
 }
 
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per image
+// Image format/size rules are enforced by @/lib/imageProcessing.
+
 const MAX_IMAGES = 20;
 
 const SubmitAssignment = () => {
@@ -107,156 +113,9 @@ const SubmitAssignment = () => {
     };
   }, []);
 
-  const validateImageFile = (file: File): string | null => {
-    const ext = (file.name.split('.').pop() ?? '').toLowerCase();
-    const isValidType = ACCEPTED_IMAGE_TYPES.includes(file.type) || ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(ext);
+  // Image validation, HEIC conversion, EXIF-aware decoding, downscaling and
+  // JPEG encoding all live in the shared mobile-safe pipeline.
 
-    if (!isValidType) {
-      return `"${file.name}" is not a supported image format. Use JPG, PNG, WEBP, HEIC, or HEIF.`;
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      return `"${file.name}" exceeds 10MB. Please compress it before uploading.`;
-    }
-    return null;
-  };
-
-  const resizeAndEncode = async (
-    source: CanvasImageSource,
-    srcW: number,
-    srcH: number
-  ): Promise<Blob> => {
-    let w = srcW;
-    let h = srcH;
-    if (w > 1920 || h > 1920) {
-      if (w >= h) {
-        h = Math.round(h * (1920 / w));
-        w = 1920;
-      } else {
-        w = Math.round(w * (1920 / h));
-        h = 1920;
-      }
-    }
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas context unavailable');
-    ctx.drawImage(source, 0, 0, w, h);
-    const blob: Blob | null = await new Promise((resolve) =>
-      canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.85)
-    );
-    canvas.width = 0;
-    canvas.height = 0;
-    if (!blob) throw new Error('Canvas toBlob returned null');
-    return blob;
-  };
-
-  // Materialize the file bytes into an in-memory Blob.
-  // Android Chrome's Google Photos picker returns lazy content:// File objects;
-  // by the time submit runs, createImageBitmap/<img> can't fetch them anymore.
-  // Reading bytes up-front guarantees the data stays available.
-  const materializeFile = async (file: File): Promise<Blob> => {
-    try {
-      const buf = await file.arrayBuffer();
-      const type = file.type || 'image/jpeg';
-      return new Blob([buf], { type });
-    } catch (e) {
-      console.warn('arrayBuffer() failed, falling back to FileReader', e);
-      try {
-        return await new Promise<Blob>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const result = reader.result as ArrayBuffer;
-            resolve(new Blob([result], { type: file.type || 'image/jpeg' }));
-          };
-          reader.onerror = () =>
-            reject(new Error(`Could not read "${file.name}" from your device.`));
-          reader.readAsArrayBuffer(file);
-        });
-      } catch (readerError) {
-        console.warn('FileReader failed, falling back to object URL fetch', readerError);
-        const tempUrl = URL.createObjectURL(file);
-        try {
-          const response = await fetch(tempUrl);
-          if (!response.ok) {
-            throw new Error(`Could not access "${file.name}" from your gallery.`);
-          }
-          const blob = await response.blob();
-          return new Blob([blob], { type: blob.type || file.type || 'image/jpeg' });
-        } finally {
-          URL.revokeObjectURL(tempUrl);
-        }
-      }
-    }
-  };
-
-  const snapshotFileForUpload = async (file: File): Promise<File> => {
-    const blob = await materializeFile(file);
-    const name = file.name || `page-${Date.now()}.jpg`;
-    const type = blob.type || file.type || 'image/jpeg';
-    return new File([blob], name, { type, lastModified: Date.now() });
-  };
-
-  const decodeBlobToBitmapOrImg = async (
-    blob: Blob,
-    fileName: string
-  ): Promise<{ source: CanvasImageSource; w: number; h: number; cleanup: () => void }> => {
-    // Attempt 1: createImageBitmap on the in-memory blob (handles EXIF orientation)
-    if (typeof createImageBitmap === 'function') {
-      try {
-        let bitmap: ImageBitmap;
-        try {
-          bitmap = await createImageBitmap(blob, {
-            imageOrientation: 'from-image',
-          } as ImageBitmapOptions);
-        } catch {
-          bitmap = await createImageBitmap(blob);
-        }
-        return {
-          source: bitmap,
-          w: bitmap.width,
-          h: bitmap.height,
-          cleanup: () => bitmap.close?.(),
-        };
-      } catch (e) {
-        console.warn('createImageBitmap failed, falling back to <img>', e);
-      }
-    }
-
-    // Attempt 2: HTMLImageElement via object URL on the in-memory blob
-    return new Promise((resolve, reject) => {
-      const objectUrl = URL.createObjectURL(blob);
-      const imgEl = new window.Image();
-      imgEl.decoding = 'async';
-      imgEl.onload = () => {
-        resolve({
-          source: imgEl,
-          w: imgEl.naturalWidth,
-          h: imgEl.naturalHeight,
-          cleanup: () => URL.revokeObjectURL(objectUrl),
-        });
-      };
-      imgEl.onerror = () => {
-        URL.revokeObjectURL(objectUrl);
-        reject(
-          new Error(
-            `Could not decode "${fileName}". If it's HEIC/HEIF (iPhone), open it in Photos and export as JPG, then re-upload.`
-          )
-        );
-      };
-      imgEl.src = objectUrl;
-    });
-  };
-
-  const normalizeImageFile = async (file: File): Promise<Blob> => {
-    const blob = await materializeFile(file);
-    const { source, w, h, cleanup } = await decodeBlobToBitmapOrImg(blob, file.name);
-    try {
-      return await resizeAndEncode(source, w, h);
-    } finally {
-      cleanup();
-    }
-  };
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -690,7 +549,7 @@ const SubmitAssignment = () => {
                   One image per handwritten page
                 </p>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Supported formats: JPG, PNG, WEBP (max 10MB each)
+                  Supported: JPG, PNG, WEBP, HEIC (iPhone) — max 30MB each
                 </p>
                 <input
                   ref={fileInputRef}

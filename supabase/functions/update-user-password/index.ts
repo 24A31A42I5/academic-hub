@@ -65,37 +65,55 @@ serve(async (req: Request) => {
       });
     }
 
-    const { user_id, password } = await req.json();
-    console.log("Attempting to update password for user_id:", user_id);
-    const normalizedPassword = (password ?? "").toString().trim() || "king@1234";
+    // Project-wide default for newly created / reset student accounts.
+    const DEFAULT_STUDENT_PASSWORD = "king@1234";
 
-    if (!user_id || normalizedPassword.length < 8) {
-      console.error("Validation failed. user_id:", user_id, "password length:", normalizedPassword.length);
-      return new Response(JSON.stringify({ error: "user_id and a valid password required" }), {
+    let body: { user_id?: string; password?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid request body" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { user_id } = body;
+    // Blank password == "reset to the default".
+    const newPassword = (body.password ?? "").toString().trim() || DEFAULT_STUDENT_PASSWORD;
+
+    if (!user_id || typeof user_id !== "string") {
+      return new Response(JSON.stringify({ error: "user_id is required" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return new Response(JSON.stringify({ error: "Password must be at least 8 characters" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const { data: updatedUser, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
       user_id,
-      { password: normalizedPassword }
+      { password: newPassword }
     );
 
     if (updateError) {
-      console.error("Password update error:", updateError.message);
-      return new Response(JSON.stringify({ error: "Failed to update password", details: updateError.message }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      // Never log the password itself — only the failure reason.
+      console.error("Password update failed:", updateError.message);
+      return new Response(JSON.stringify({ error: updateError.message }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     if (!updatedUser?.user) {
-      console.error("Password update returned no user for user_id:", user_id);
+      console.error("Password update returned no user");
       return new Response(JSON.stringify({ error: "Failed to update password" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    console.log("Password successfully updated for user_id:", user_id);
+
     return new Response(JSON.stringify({ success: true }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
