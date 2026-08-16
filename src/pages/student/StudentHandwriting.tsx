@@ -228,14 +228,23 @@ const StudentHandwriting = () => {
 
         if (featureError) {
           console.error('Feature extraction error:', featureError);
-          toast.warning('Image uploaded but feature extraction failed. Your submission will still work.');
+          // Surface the real reason (e.g. "sample appears typed/printed") so the
+          // student knows whether to retake the photo instead of just retrying.
+          toast.warning(featureError.message || 'Feature extraction failed.', {
+            description: 'Your sample was saved. Use "Train AI Model" to retry after fixing the issue.',
+            duration: 8000,
+          });
         } else if (featureData?.success) {
           toast.success('Handwriting features extracted successfully!');
         }
       } catch (featureErr) {
         console.error('Feature extraction error:', featureErr);
-        toast.warning('Image uploaded but feature extraction failed.');
+        toast.warning(
+          featureErr instanceof Error ? featureErr.message : 'Feature extraction failed.',
+          { description: 'Your sample was saved. Use "Train AI Model" to retry.', duration: 8000 },
+        );
       }
+
 
       // Refresh student details
       const { data: updatedDetails } = await supabase
