@@ -19,15 +19,8 @@ export const MAX_IMAGE_DIMENSION = 1920;
 /** Upper bound on the ORIGINAL file. Normalization compresses well below this. */
 export const MAX_SOURCE_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
-const SUPPORTED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'];
-const SUPPORTED_MIME = [
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'image/heif',
-];
+
+
 
 export const getExtension = (name: string): string =>
   (name.split('.').pop() ?? '').toLowerCase();
@@ -58,15 +51,33 @@ export const sniffImageType = (bytes: Uint8Array): string | null => {
   return null;
 };
 
-/** Validate an image before it is accepted into the upload list. */
+/** Extensions that are definitely not images — everything else gets a chance. */
+const REJECTED_EXTENSIONS = [
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'rtf', 'csv',
+  'zip', 'rar', '7z', 'mp4', 'mov', 'avi', 'mkv', 'mp3', 'wav', 'exe', 'apk',
+];
+
+/**
+ * Validate an image before it is accepted into the upload list.
+ *
+ * Deliberately permissive about MIME type: mobile cameras and gallery pickers
+ * routinely report `""` or `application/octet-stream` for perfectly valid
+ * JPEGs. Only clearly non-image files are rejected here; anything ambiguous is
+ * settled later by sniffing the actual bytes, which cannot be faked by a
+ * wrong content type.
+ */
 export const validateImageFile = (file: File): string | null => {
   const ext = getExtension(file.name);
-  const typeOk = SUPPORTED_MIME.includes((file.type || '').toLowerCase());
-  const extOk = SUPPORTED_EXTENSIONS.includes(ext);
+  const type = (file.type || '').toLowerCase();
 
-  // Mobile browsers often omit the MIME type entirely; accept on extension, and
-  // when both are missing let the byte sniffer decide during processing.
-  if (!typeOk && !extOk && file.type && !file.type.startsWith('image/')) {
+  const isRejectedType =
+    REJECTED_EXTENSIONS.includes(ext) ||
+    type === 'application/pdf' ||
+    type.startsWith('video/') ||
+    type.startsWith('audio/') ||
+    type.startsWith('text/');
+
+  if (isRejectedType) {
     return `"${file.name}" is not a supported image. Use JPG, PNG, WEBP, or HEIC.`;
   }
   if (file.size === 0) {
@@ -77,6 +88,7 @@ export const validateImageFile = (file: File): string | null => {
   }
   return null;
 };
+
 
 /**
  * Read the file's bytes into memory immediately. This is what keeps Android
