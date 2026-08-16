@@ -19,15 +19,8 @@ export const MAX_IMAGE_DIMENSION = 1920;
 /** Upper bound on the ORIGINAL file. Normalization compresses well below this. */
 export const MAX_SOURCE_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
-const SUPPORTED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'];
-const SUPPORTED_MIME = [
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'image/heif',
-];
+
+
 
 export const getExtension = (name: string): string =>
   (name.split('.').pop() ?? '').toLowerCase();
