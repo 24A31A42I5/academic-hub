@@ -567,21 +567,27 @@ const StudentHandwriting = () => {
               <AlertTriangle className="w-5 h-5" />
               Confirm Handwriting Submission
             </DialogTitle>
-            <DialogDescription className="text-left">
-              <strong className="text-destructive">This action cannot be undone!</strong>
-              <br /><br />
-              Once you submit this handwriting sample, it will be permanently linked to your 
-              account and cannot be changed. The AI will extract your unique handwriting features 
-              for verification.
-              <br /><br />
-              Please verify that your sample contains:
-              <ul className="list-disc list-inside mt-2 text-sm">
-                <li>All capital letters (A-Z)</li>
-                <li>All lowercase letters (a-z)</li>
-                <li>All numbers (0-9)</li>
-                <li>The sample sentences</li>
-              </ul>
+            {/* asChild + div: a <ul> is invalid inside the default <p> element */}
+            <DialogDescription asChild>
+              <div className="text-left text-sm text-muted-foreground">
+                <p>
+                  <strong className="text-destructive">This action cannot be undone!</strong>
+                </p>
+                <p className="mt-3">
+                  Once you submit this handwriting sample, it will be permanently linked to your
+                  account and cannot be changed. The AI will extract your unique handwriting features
+                  for verification.
+                </p>
+                <p className="mt-3">Please verify that your sample contains:</p>
+                <ul className="list-disc list-inside mt-2">
+                  <li>All capital letters (A-Z)</li>
+                  <li>All lowercase letters (a-z)</li>
+                  <li>All numbers (0-9)</li>
+                  <li>The sample sentences</li>
+                </ul>
+              </div>
             </DialogDescription>
+
           </DialogHeader>
 
           {previewUrl && (
