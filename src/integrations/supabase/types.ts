@@ -158,6 +158,59 @@ export type Database = {
         }
         Relationships: []
       }
+      handwriting_samples: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          extracted_features: Json | null
+          extraction_confidence: number | null
+          id: string
+          image_hash: string | null
+          quality_metrics: Json | null
+          schema_version: string | null
+          status: string
+          storage_path: string
+          student_profile_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          extracted_features?: Json | null
+          extraction_confidence?: number | null
+          id?: string
+          image_hash?: string | null
+          quality_metrics?: Json | null
+          schema_version?: string | null
+          status?: string
+          storage_path: string
+          student_profile_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          extracted_features?: Json | null
+          extraction_confidence?: number | null
+          id?: string
+          image_hash?: string | null
+          quality_metrics?: Json | null
+          schema_version?: string | null
+          status?: string
+          storage_path?: string
+          student_profile_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "handwriting_samples_student_profile_id_fkey"
+            columns: ["student_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       internal_secrets: {
         Row: {
           created_at: string
@@ -213,6 +266,8 @@ export type Database = {
           handwriting_feature_embedding: Json | null
           handwriting_features_extracted_at: string | null
           handwriting_image_hash: string | null
+          handwriting_profile_version: string | null
+          handwriting_sample_count: number
           handwriting_submitted_at: string | null
           handwriting_url: string | null
           has_logged_in: boolean | null
@@ -230,6 +285,8 @@ export type Database = {
           handwriting_feature_embedding?: Json | null
           handwriting_features_extracted_at?: string | null
           handwriting_image_hash?: string | null
+          handwriting_profile_version?: string | null
+          handwriting_sample_count?: number
           handwriting_submitted_at?: string | null
           handwriting_url?: string | null
           has_logged_in?: boolean | null
@@ -247,6 +304,8 @@ export type Database = {
           handwriting_feature_embedding?: Json | null
           handwriting_features_extracted_at?: string | null
           handwriting_image_hash?: string | null
+          handwriting_profile_version?: string | null
+          handwriting_sample_count?: number
           handwriting_submitted_at?: string | null
           handwriting_url?: string | null
           has_logged_in?: boolean | null
