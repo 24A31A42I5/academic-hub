@@ -1,6 +1,17 @@
+// These imports are resolved by the Supabase/Deno runtime, not the Vite TypeScript project.
+// @ts-expect-error Deno remote module
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-expect-error Deno remote module
 import { encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+// @ts-expect-error Deno remote module
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
+import { analyzeHandwriting } from "../_shared/handwriting/analysisService.ts";
+import { createLovableGeminiProvider } from "../_shared/handwriting/provider.ts";
+import { aggregatePages, comparePage, type EnrollmentSample, type PageResult as V8PageResult } from "../_shared/handwriting/compare.ts";
+import { MIN_ENROLLMENT_SAMPLES } from "../_shared/handwriting/config.ts";
+import type { ExtractedProfile } from "../_shared/handwriting/schema.ts";
+
+declare const Deno: { env: { get(name: string): string | undefined } };
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,10 +33,16 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 interface PageResult {
   page: number;
-  similarity: number;
+  similarity: number | null;
   same_writer: boolean;
   is_handwritten: boolean;
   confidence: string;
+  coverage?: number | null;
+  status?: string;
+  quality_status?: string | null;
+  extraction_confidence?: number | null;
+  per_sample_scores?: Array<{ sample_id: string; similarity: number | null; coverage: number }>;
+  category?: string | null;
 }
 
 // ==================== STRICT ENUM DEFINITIONS ====================
@@ -680,13 +697,15 @@ async function fetchImageAsBase64(url: string, supabase: any): Promise<{ base64:
   return { base64, size: arrayBuffer.byteLength };
 }
 
-function determineRiskLevel(score: number, hasCriticalFlag: boolean): string {
+function determineRiskLevel(score: number | null, hasCriticalFlag: boolean): string {
+  if (score === null) return 'medium';
   if (hasCriticalFlag || score < VERIFICATION_THRESHOLDS.MANUAL_REVIEW) return 'high';
   if (score < VERIFICATION_THRESHOLDS.VERIFIED) return 'medium';
   return 'low';
 }
 
-function determineStatus(score: number, hasCriticalFlag: boolean, hasTypedContent: boolean): string {
+function determineStatus(score: number | null, hasCriticalFlag: boolean, hasTypedContent: boolean): string {
+  if (score === null) return 'needs_manual_review';
   if (hasTypedContent) return 'needs_manual_review';
   if (hasCriticalFlag || score < VERIFICATION_THRESHOLDS.MANUAL_REVIEW) return 'needs_manual_review';
   if (score < VERIFICATION_THRESHOLDS.VERIFIED) return 'needs_manual_review';
@@ -696,7 +715,7 @@ function determineStatus(score: number, hasCriticalFlag: boolean, hasTypedConten
 type ErrorType = 'no_profile' | 'file_too_large' | 'ai_gateway_error' | 'parse_error' | 'rate_limit' | 'typed_content_detected' | 'unknown';
 
 interface FallbackResult {
-  score: number;
+  score: number | null;
   risk_level: string;
   status: string;
   error_type: ErrorType;
@@ -705,20 +724,20 @@ interface FallbackResult {
 
 function getFallbackResult(errorType: ErrorType): FallbackResult {
   const fallbacks: Record<ErrorType, FallbackResult> = {
-    no_profile: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'no_profile', message: 'No handwriting profile found. Please upload your handwriting sample first.' },
-    file_too_large: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'file_too_large', message: 'Image too large for automatic verification. Manual review required.' },
-    typed_content_detected: { score: 0, risk_level: 'high', status: 'needs_manual_review', error_type: 'typed_content_detected', message: 'Typed or printed content detected. Only handwritten pages are accepted.' },
-    rate_limit: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'rate_limit', message: 'AI service busy. Your submission will be reviewed manually.' },
-    ai_gateway_error: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'ai_gateway_error', message: 'AI analysis temporarily unavailable. Manual review required.' },
-    parse_error: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'parse_error', message: 'Could not process AI response. Manual review required.' },
-    unknown: { score: 50, risk_level: 'medium', status: 'needs_manual_review', error_type: 'unknown', message: 'Verification encountered an issue. Manual review required.' },
+    no_profile: { score: null, risk_level: 'medium', status: 'needs_manual_review', error_type: 'no_profile', message: 'Enrollment is incomplete. Add at least 3 handwriting samples before automatic consistency results are available.' },
+    file_too_large: { score: null, risk_level: 'medium', status: 'needs_manual_review', error_type: 'file_too_large', message: 'Image too large for automatic verification. Manual review required.' },
+    typed_content_detected: { score: null, risk_level: 'medium', status: 'needs_manual_review', error_type: 'typed_content_detected', message: 'Typed or printed content detected. Only handwritten pages are accepted; no consistency score was produced.' },
+    rate_limit: { score: null, risk_level: 'medium', status: 'needs_manual_review', error_type: 'rate_limit', message: 'AI service busy. Manual review required; no consistency score was produced.' },
+    ai_gateway_error: { score: null, risk_level: 'medium', status: 'needs_manual_review', error_type: 'ai_gateway_error', message: 'AI analysis temporarily unavailable. Manual review required; no consistency score was produced.' },
+    parse_error: { score: null, risk_level: 'medium', status: 'needs_manual_review', error_type: 'parse_error', message: 'Could not process AI response. Manual review required; no consistency score was produced.' },
+    unknown: { score: null, risk_level: 'medium', status: 'needs_manual_review', error_type: 'unknown', message: 'Verification encountered an issue. Manual review required; no consistency score was produced.' },
   };
   return { ...fallbacks[errorType] };
 }
 
 // ==================== MAIN HANDLER ====================
 
-serve(async (req) => {
+serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -769,17 +788,11 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { submission_id, file_urls, file_url, student_profile_id } = body;
-
-    const imageUrls: string[] = file_urls || (file_url ? [file_url] : []);
+    const { submission_id } = body;
 
     console.log('=== HANDWRITING VERIFICATION v7.0-MASTERPIECE START ===');
     console.log('Submission ID:', submission_id);
-    console.log('Image URLs:', imageUrls.length, 'pages');
-    console.log('Student Profile ID:', student_profile_id);
-
     if (!submission_id) throw new Error('submission_id is required');
-    if (imageUrls.length === 0) throw new Error('No image URLs provided');
     if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY is not configured');
 
     // Load feature statistics for weighted comparison
@@ -799,15 +812,17 @@ serve(async (req) => {
     // Ownership / authorization verification
     const { data: submissionRow } = await supabase
       .from('submissions')
-      .select('student_profile_id, assignment_id')
+      .select('student_profile_id, assignment_id, file_url, file_urls')
       .eq('id', submission_id)
       .single();
 
     if (!submissionRow) throw new Error('Submission not found');
 
-    if (submissionRow.student_profile_id !== student_profile_id) {
-      throw new Error('Submission does not belong to the claimed student profile');
-    }
+    const student_profile_id = submissionRow.student_profile_id;
+    const imageUrls: string[] = submissionRow.file_urls?.length ? submissionRow.file_urls : (submissionRow.file_url ? [submissionRow.file_url] : []);
+    if (imageUrls.length === 0) throw new Error('No stored submission files found');
+    console.log('Image URLs:', imageUrls.length, 'pages');
+    console.log('Student Profile ID:', student_profile_id);
 
     // Authorization: owning student, assignment faculty, or admin
     const isOwner = callerProfile.id === submissionRow.student_profile_id;
@@ -853,7 +868,9 @@ serve(async (req) => {
       }
     }
 
-    // Fetch student's stored handwriting profile (reference)
+    // Fetch the consolidated profile and its accepted samples. The samples are
+    // the source of truth for v8 comparison; the consolidated row remains for
+    // backward-compatible screens and reporting.
     const { data: studentDetails, error: studentError } = await supabase
       .from('student_details')
       .select('handwriting_feature_embedding, handwriting_url, handwriting_features_extracted_at, roll_number')
@@ -862,10 +879,14 @@ serve(async (req) => {
 
     if (studentError) throw new Error('Failed to fetch student details');
 
-    const handwritingProfile = studentDetails?.handwriting_feature_embedding;
+    const { data: acceptedSamples } = await supabase
+      .from('handwriting_samples')
+      .select('id, extracted_features')
+      .eq('student_profile_id', student_profile_id)
+      .eq('status', 'accepted')
+      .order('created_at', { ascending: true });
 
-    // If no handwriting profile exists, mark for manual review
-    if (!handwritingProfile) {
+    if (!studentDetails?.handwriting_feature_embedding || (acceptedSamples?.length ?? 0) < MIN_ENROLLMENT_SAMPLES) {
       console.log('No handwriting profile found - marking for manual review');
       const fallback = getFallbackResult('no_profile');
       
@@ -892,39 +913,17 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-
-    // Normalize the stored reference profile
-    const referenceProfile = normalizeProfile(handwritingProfile);
-    if (!referenceProfile) {
-      console.error('Failed to normalize reference profile');
-      const fallback = getFallbackResult('no_profile');
-      fallback.message = 'Handwriting profile could not be normalized. Please retrain your handwriting sample.';
-      
-      await supabase
-        .from('submissions')
-        .update({
-          ai_similarity_score: fallback.score,
-          ai_confidence_score: 0,
-          ai_risk_level: fallback.risk_level,
-          status: fallback.status,
-          verified_at: new Date().toISOString(),
-          ai_analysis_details: {
-            algorithm_version: '7.0-masterpiece-weighted',
-            error_type: 'parse_error',
-            reason: fallback.message,
-            page_count: imageUrls.length,
-            recommendation: 'Student should retrain handwriting profile'
-          },
-          page_verification_results: null,
-        })
-        .eq('id', submission_id);
-
-      return new Response(JSON.stringify({ success: true, ...fallback }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    const enrollmentSamples = (acceptedSamples ?? [])
+      .filter((sample: { id: string; extracted_features: unknown }) => sample.extracted_features)
+      .map((sample: { id: string; extracted_features: unknown }) => ({ id: sample.id, profile: sample.extracted_features as ExtractedProfile })) as EnrollmentSample[];
+    if (enrollmentSamples.length < MIN_ENROLLMENT_SAMPLES) {
+      const fallback = getFallbackResult('parse_error');
+      fallback.message = 'Enrollment samples are incomplete. Add three accepted camera samples before verification.';
+      await supabase.from('submissions').update({ ai_similarity_score: null, ai_confidence_score: 0, ai_risk_level: fallback.risk_level, status: fallback.status, verified_at: new Date().toISOString(), ai_analysis_details: { algorithm_version: '8.0-consistency', error_type: fallback.error_type, reason: fallback.message, page_count: imageUrls.length }, page_verification_results: null }).eq('id', submission_id);
+      return new Response(JSON.stringify({ success: true, ...fallback }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-
-    console.log('Reference profile normalized successfully');
+    const provider = createLovableGeminiProvider(LOVABLE_API_KEY);
+    console.log('Loaded v8 enrollment samples:', enrollmentSamples.length);
 
     // Process each page
     const pageResults: PageResult[] = [];
@@ -948,38 +947,16 @@ serve(async (req) => {
         const { base64: pageBase64, size: pageBytes } = await fetchImageAsBase64(pageUrl, supabase);
 
         if (pageBytes > MAX_IMAGE_BYTES) {
-          return { result: { page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' }, comparison: null };
+          return { result: { page: pageNum, similarity: null, same_writer: false, is_handwritten: true, confidence: 'low' }, comparison: null };
         }
 
-        // Stage 1: Extract features from submission page
-        const { profile: submissionProfile, is_handwritten } = await extractPageFeatures(pageNum, pageBase64, LOVABLE_API_KEY);
-
-        if (!is_handwritten) {
-          return { result: { page: pageNum, similarity: 0, same_writer: false, is_handwritten: false, confidence: 'high' }, comparison: null };
-        }
-
-        if (!submissionProfile) {
-          return { result: { page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' }, comparison: null };
-        }
-
-        // Stage 2: Weighted deterministic comparison
-        const comparison = compareProfilesWeighted(referenceProfile, submissionProfile, weightMap);
-        const confidenceStr = comparison.confidence_level >= 0.7 ? 'high'
-          : comparison.confidence_level >= 0.4 ? 'medium' : 'low';
-
-        return {
-          result: {
-            page: pageNum,
-            similarity: comparison.similarity_score,
-            same_writer: comparison.same_writer,
-            is_handwritten: true,
-            confidence: confidenceStr,
-          },
-          comparison,
-        };
+        const analysis = await analyzeHandwriting(provider, pageBase64);
+        if (!analysis.ok) return { result: { page: pageNum, similarity: null, same_writer: false, is_handwritten: true, confidence: 'low', status: 'processing_error' }, comparison: null };
+        const v8Result = comparePage(pageNum, analysis.profile, enrollmentSamples);
+        return { result: { ...v8Result, similarity: v8Result.similarity, same_writer: v8Result.category === 'high', is_handwritten: v8Result.is_handwritten, confidence: v8Result.confidence }, comparison: null };
       } catch (pageError: any) {
         console.error(`Error processing page ${pageNum}:`, pageError);
-        return { result: { page: pageNum, similarity: 50, same_writer: false, is_handwritten: true, confidence: 'low' }, comparison: null };
+        return { result: { page: pageNum, similarity: null, same_writer: false, is_handwritten: true, confidence: 'low' }, comparison: null };
       }
     };
 
@@ -995,6 +972,7 @@ serve(async (req) => {
     for (const { result, comparison } of processed) {
       pageResults.push(result);
       if (!result.is_handwritten) hasTypedContent = true;
+      if (result.category === 'low' || result.status === 'processing_error') hasDifferentWriter = true;
       if (comparison) {
         lastComparisonResult = comparison;
         totalRareMatches += comparison.rare_feature_matches;
@@ -1010,13 +988,15 @@ serve(async (req) => {
     // Robust multi-page aggregation:
     // Use weighted average (penalizing outliers) instead of pure minimum
     // which is too sensitive to per-page extraction noise
-    const similarities = pageResults.map(p => p.similarity);
-    const minSimilarity = Math.min(...similarities);
-    const avgSimilarity = similarities.reduce((a, b) => a + b, 0) / similarities.length;
-    
-    // Weighted: 60% average + 40% minimum — balances fairness with conservatism
-    const overallSimilarity = Math.round(avgSimilarity * 0.6 + minSimilarity * 0.4);
-    const overallSameWriter = pageResults.every(p => p.same_writer) && !hasDifferentWriter;
+    const assignmentPages = pageResults.map((page) => ({
+      ...page,
+      status: page.status ?? 'processing_error',
+      coverage: page.coverage ?? null,
+    })) as unknown as V8PageResult[];
+    const assignmentResult = aggregatePages(assignmentPages);
+    const overallSimilarity = assignmentResult.similarity;
+    const overallCategory = assignmentResult.category;
+    const overallSameWriter = overallCategory === 'high';
     
     // Use the best threshold across pages (most evidence = fairest threshold)
     const confidenceLevels = pageResults.map(p => p.confidence);
@@ -1025,7 +1005,7 @@ serve(async (req) => {
       : 'high';
     const confidenceScore = overallConfidence === 'high' ? 90 : overallConfidence === 'medium' ? 70 : 50;
 
-    console.log(`Aggregation: avg=${avgSimilarity.toFixed(1)}, min=${minSimilarity}, weighted=${overallSimilarity}`);
+    console.log(`Aggregation: score=${overallSimilarity ?? 'none'}, category=${overallCategory ?? 'none'}, valid=${assignmentResult.valid_pages}`);
 
     // Determine final status
     const hasCriticalFlag = hasDifferentWriter || hasTypedContent;
@@ -1037,9 +1017,9 @@ serve(async (req) => {
     if (hasTypedContent) finalReasoning = 'One or more pages contain typed/printed content. ';
     if (hasDifferentWriter) finalReasoning += 'Handwriting inconsistency detected. ';
     if (overallSameWriter && !hasTypedContent) {
-      finalReasoning = `All ${pageResults.length} pages verified as same writer with ${overallSimilarity}% similarity.`;
+      finalReasoning = `All ${pageResults.length} valid pages are consistent at ${overallSimilarity}% similarity.`;
     } else if (!hasTypedContent && !hasDifferentWriter) {
-      finalReasoning = `Verification completed with ${overallSimilarity}% overall similarity across ${pageResults.length} pages.`;
+      finalReasoning = overallSimilarity === null ? 'No consistency score was produced. Manual review is required.' : `Consistency review completed with ${overallSimilarity}% overall similarity across ${assignmentResult.valid_pages} valid pages.`;
     }
 
     // ==================== ANTI-SPOOFING CHECK ====================
@@ -1087,14 +1067,17 @@ serve(async (req) => {
         status: status,
         verified_at: new Date().toISOString(),
         ai_analysis_details: {
-          algorithm_version: '7.0-masterpiece-weighted',
+          algorithm_version: '8.0-consistency',
           page_count: pageResults.length,
           overall_similarity_score: overallSimilarity,
+          consistency_category: overallCategory,
+          valid_pages: assignmentResult.valid_pages,
+          invalid_pages: assignmentResult.invalid_pages,
           same_writer: overallSameWriter,
           confidence_level: overallConfidence,
           has_typed_content: hasTypedContent,
           has_different_writer: hasDifferentWriter,
-          aggregation_method: 'weighted_average_0.6_avg_0.4_min',
+          aggregation_method: 'v8_valid_pages_60_percent_average_40_percent_minimum',
           page_results: pageResults,
           final_reasoning: finalReasoning,
           rare_feature_matches: totalRareMatches,
@@ -1125,6 +1108,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       success: true,
       similarity_score: overallSimilarity,
+      consistency_category: overallCategory,
       same_writer: overallSameWriter,
       risk_level: riskLevel,
       status: status,

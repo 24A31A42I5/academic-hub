@@ -79,6 +79,13 @@ serve(async (req) => {
       return errorResponse('Forbidden', 403);
     }
 
+    const { data: student } = await supabaseAdmin
+      .from('profiles')
+      .select('user_id')
+      .eq('id', submission.student_profile_id)
+      .single();
+    if (!student?.user_id) return errorResponse('Student profile not found', 404);
+
     // Collect paths: prefer file_urls, fall back to file_url
     const rawPaths: string[] = submission.file_urls && submission.file_urls.length > 0
       ? submission.file_urls
@@ -97,6 +104,10 @@ serve(async (req) => {
         storagePath = match ? match.split('?')[0] : path;
       } else {
         storagePath = path;
+      }
+
+      if (storagePath.includes('..') || !storagePath.startsWith(`${student.user_id}/`)) {
+        return errorResponse('File path is outside the student folder', 403);
       }
 
       const { data: signedData, error: signError } = await supabaseAdmin.storage

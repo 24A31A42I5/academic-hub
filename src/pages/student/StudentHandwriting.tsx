@@ -1,13 +1,9 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
-import {
-  validateImageFile,
-  snapshotFileForUpload,
-  normalizeImageFile,
-} from '@/lib/imageProcessing';
+import { DocumentCapture } from '@/components/DocumentCapture';
 
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -46,7 +42,6 @@ const StudentHandwriting = () => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [copied, setCopied] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [signedHandwritingUrl, setSignedHandwritingUrl] = useState<string | null>(null);
 
   // Refresh signed URL whenever the underlying handwriting_url changes.
@@ -113,49 +108,18 @@ const StudentHandwriting = () => {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
-  // Decode + re-encode to JPEG. This also strips EXIF metadata, converts HEIC
-  // from iPhones, and keeps the sample high-quality for feature extraction.
-  const stripExifData = async (file: File): Promise<Blob> =>
-    normalizeImageFile(file, { quality: 0.95, maxDimension: 2400 });
-
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const validationError = validateImageFile(file);
-    if (validationError) {
-      toast.error(validationError);
-      if (event.target) event.target.value = '';
-      return;
-    }
-
-    try {
-      // Snapshot bytes (and convert HEIC) so phone gallery handles cannot expire
-      // and the preview renders on every browser.
-      const stableFile = await snapshotFileForUpload(file);
-      setSelectedFile(stableFile);
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return URL.createObjectURL(stableFile);
-      });
-      setShowConfirmDialog(true);
-    } catch (e) {
-      console.error('Failed to prepare handwriting image:', e);
-      toast.error(e instanceof Error ? e.message : 'Cannot access the selected image. Please choose it again.');
-    } finally {
-      // Allow re-selecting the same file after an error.
-      if (event.target) event.target.value = '';
-    }
+  const handleCapture = (file: File) => {
+    setSelectedFile(file);
+    setPreviewUrl((previous) => { if (previous) URL.revokeObjectURL(previous); return URL.createObjectURL(file); });
+    setShowConfirmDialog(true);
   };
-
-
 
   const handleUpload = async () => {
     if (!selectedFile || !user || !studentDetails) return;
 
     setUploading(true);
     try {
-      // Compute hash of original file
+      // Compute hash of the unchanged camera original.
       const imageHash = await computeFileHash(selectedFile);
       
       // Check if this exact image has been uploaded before (limit(1) avoids
@@ -174,15 +138,11 @@ const StudentHandwriting = () => {
       }
 
 
-      // Strip EXIF data
-      const strippedImage = await stripExifData(selectedFile);
-      
-      // Upload to storage
-      const fileName = `${user.id}/handwriting.jpg`;
+      const fileName = `${user.id}/samples/${Date.now()}-${imageHash.slice(0, 12)}.jpg`;
 
       const { error: uploadError } = await supabase.storage
         .from('handwriting-samples')
-        .upload(fileName, strippedImage, {
+        .upload(fileName, selectedFile, {
           cacheControl: '0',
           upsert: true,
           contentType: 'image/jpeg',
@@ -197,23 +157,6 @@ const StudentHandwriting = () => {
         return;
       }
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('handwriting-samples')
-        .getPublicUrl(fileName);
-
-      // Update student_details with handwriting URL and hash
-      const { error: updateError } = await supabase
-        .from('student_details')
-        .update({
-          handwriting_url: publicUrl,
-          handwriting_submitted_at: new Date().toISOString(),
-          handwriting_image_hash: imageHash,
-        })
-        .eq('id', studentDetails.id);
-
-      if (updateError) throw updateError;
-
       // Now extract features using the edge function
       setUploading(false);
       setExtractingFeatures(true);
@@ -221,8 +164,8 @@ const StudentHandwriting = () => {
       try {
         const { data: featureData, error: featureError } = await invokeEdgeFunction('extract-handwriting-features', {
           body: {
-            image_url: publicUrl,
-            student_details_id: studentDetails.id,
+            storage_path: fileName,
+            quality_metrics: { captured_in_browser: true },
           },
         });
 
@@ -254,7 +197,7 @@ const StudentHandwriting = () => {
         .single();
 
       setStudentDetails(updatedDetails);
-      toast.success('Handwriting sample uploaded successfully');
+      toast.success('Camera sample processed. Add at least 3 samples to build your consistency profile.');
       setShowConfirmDialog(false);
       setSelectedFile(null);
       setPreviewUrl(null);
@@ -280,9 +223,6 @@ const StudentHandwriting = () => {
       URL.revokeObjectURL(previewUrl);
     }
     setPreviewUrl(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
   };
 
   // Retrain/re-extract features from existing handwriting sample
@@ -294,22 +234,17 @@ const StudentHandwriting = () => {
 
     setRetraining(true);
     try {
-      // Build cache-busted URL
-      const freshUrl = `${studentDetails.handwriting_url.split('?')[0]}?t=${Date.now()}`;
-
-      // Call edge function which runs with service_role and can clear + re-extract
+      // Rebuild the consolidated v8 profile from accepted samples.
       const { data, error } = await invokeEdgeFunction('extract-handwriting-features', {
         body: {
-          image_url: freshUrl,
-          student_details_id: studentDetails.id,
-          retrain: true,
+          action: 'rebuild',
         },
       });
 
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Feature extraction failed');
 
-      toast.success('Handwriting model retrained successfully!');
+      toast.success(data.profile_ready ? 'Handwriting consistency profile rebuilt.' : 'Profile still needs more accepted camera samples.');
 
       // Refresh local state
       const { data: updatedDetails } = await supabase
@@ -343,7 +278,7 @@ const StudentHandwriting = () => {
   const hasHandwriting = !!studentDetails?.handwriting_url;
   const hasFeatures = !!studentDetails?.handwriting_feature_embedding;
   const profileVersion = (studentDetails?.handwriting_feature_embedding as any)?.version;
-  const profileNeedsUpdate = hasFeatures && profileVersion && !profileVersion.startsWith('7.');
+  const profileNeedsUpdate = hasFeatures && profileVersion && !profileVersion.startsWith('8.');
 
   return (
     <DashboardLayout title="My Handwriting" role="student" navItems={navItems}>
@@ -360,8 +295,8 @@ const StudentHandwriting = () => {
             <AlertTriangle className="h-5 w-5 text-warning" />
             <AlertTitle className="text-warning">System Upgrade: Profile Retrain Required</AlertTitle>
             <AlertDescription className="mt-2 text-muted-foreground">
-              Our verification system has been upgraded to v7.0 with improved accuracy and anti-spoofing detection.
-              Please retrain your handwriting profile for best results.
+              Our verification system now provides AI-assisted handwriting consistency verification for academic integrity.
+              Add camera samples to build a reliable consistency profile.
               <Button 
                 onClick={handleRetrainFeatures} 
                 variant="outline" 
@@ -384,10 +319,7 @@ const StudentHandwriting = () => {
           <AlertTriangle className="h-5 w-5" />
           <AlertTitle>Important Notice</AlertTitle>
           <AlertDescription className="mt-2">
-            <strong>This is a one-time upload.</strong> Once you submit your handwriting sample, 
-            it <strong>cannot be changed or deleted</strong>. Only an administrator can modify 
-            your handwriting sample after submission. Please ensure your handwriting sample is 
-            clear and represents your actual handwriting.
+            Enrollment uses 3 to 5 camera samples. Accepted samples are retained for consistency review and cannot be replaced by the student.
           </AlertDescription>
         </Alert>
 
@@ -477,6 +409,14 @@ const StudentHandwriting = () => {
                   </div>
                 </div>
 
+                {(studentDetails.handwriting_sample_count ?? 1) < 5 && (
+                  <div className="space-y-3 rounded-lg border border-dashed p-4">
+                    <p className="text-sm font-medium">Add another enrollment sample</p>
+                    <p className="text-xs text-muted-foreground">Your profile currently has {studentDetails.handwriting_sample_count ?? 1} sample(s). At least 3 accepted samples are required before new consistency results are issued.</p>
+                    <DocumentCapture pageNumber={(studentDetails.handwriting_sample_count ?? 1) + 1} onCapture={handleCapture} disabled={uploading || extractingFeatures} />
+                  </div>
+                )}
+
                 <div className="p-4 bg-muted rounded-lg">
                   <div className="flex items-start gap-2">
                     <FileWarning className="w-5 h-5 text-muted-foreground mt-0.5" />
@@ -518,29 +458,11 @@ const StudentHandwriting = () => {
                 </div>
 
                 <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                  <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-lg font-medium mb-2">Upload Your Handwriting Sample</p>
+                  <p className="text-lg font-medium mb-2">Capture a Handwriting Sample</p>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Take a clear photo of your written sample and upload it
+                    Use the guided camera capture. Gallery uploads are not accepted.
                   </p>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*,.jpg,.jpeg,.png,.webp,.heic,.heif"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                    id="handwriting-upload"
-                  />
-                  <Button
-                    variant="student"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Upload className="w-4 h-4 mr-2" />
-                    Choose Image
-                  </Button>
-                  <p className="text-xs text-muted-foreground mt-4">
-                    Accepted formats: JPG, PNG, WebP (max 5MB)
-                  </p>
+                  <DocumentCapture pageNumber={(studentDetails?.handwriting_sample_count ?? 0) + 1} onCapture={handleCapture} />
                 </div>
 
                 <div className="p-4 bg-muted rounded-lg">

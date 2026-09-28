@@ -49,7 +49,6 @@ interface VerificationDetailsDialogProps {
 
 export const VerificationDetailsDialog = ({ 
   open, 
-  onOpenChange, 
   submission 
 }: VerificationDetailsDialogProps) => {
   const details = submission.ai_analysis_details;
@@ -79,7 +78,6 @@ export const VerificationDetailsDialog = ({
     if (result.similarity >= 50) return 'bg-yellow-500/10 text-yellow-600';
     return 'bg-red-500/10 text-red-600';
   };
-
   const getEvidenceColor = (strength: string | undefined) => {
     switch (strength) {
       case 'very_strong': return 'bg-green-500/10 text-green-700 border-green-500/20';
@@ -104,7 +102,7 @@ export const VerificationDetailsDialog = ({
         return (
           <Badge className="bg-green-500/10 text-green-600 gap-1">
             <CheckCircle className="w-3 h-3" />
-            Verified - Same Writer
+            High Consistency
           </Badge>
         );
       case 'medium':
@@ -118,7 +116,7 @@ export const VerificationDetailsDialog = ({
         return (
           <Badge variant="destructive" className="gap-1">
             <XCircle className="w-3 h-3" />
-            Reupload Required
+            Low Consistency - Recapture or Manual Review
           </Badge>
         );
       default:

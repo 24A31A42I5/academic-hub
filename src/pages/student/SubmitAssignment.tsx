@@ -1,13 +1,10 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/lib/invokeEdgeFunction';
-import {
-  validateImageFile,
-  snapshotFileForUpload,
-  normalizeImageFile,
-} from '@/lib/imageProcessing';
+import { DocumentCapture } from '@/components/DocumentCapture';
+import { normalizeImageFile } from '@/lib/imageProcessing';
 
 import { DashboardLayout, DashboardIcons } from '@/components/dashboard/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -60,8 +57,9 @@ const SubmitAssignment = () => {
   const [verifyingSubmissionId, setVerifyingSubmissionId] = useState<string | null>(null);
   const [showProgress, setShowProgress] = useState(false);
   const [pageCount, setPageCount] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [verificationReady, setVerificationReady] = useState(false);
+  const [verificationScore, setVerificationScore] = useState<number | null>(null);
 
   useEffect(() => {
     if (!authLoading && (!profile || profile.role !== 'student')) {
@@ -117,52 +115,15 @@ const SubmitAssignment = () => {
   // JPEG encoding all live in the shared mobile-safe pipeline.
 
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
+  const handleCapture = (file: File) => {
     const newImages: SelectedImage[] = [];
-    const errors: string[] = [];
-
-    // Check total count
-    if (selectedImages.length + files.length > MAX_IMAGES) {
+    if (selectedImages.length >= MAX_IMAGES) {
       toast.error(`Maximum ${MAX_IMAGES} images allowed per submission.`);
       return;
     }
-
-    for (const file of Array.from(files)) {
-      const error = validateImageFile(file);
-      if (error) {
-        errors.push(error);
-      } else {
-        try {
-          // Snapshot bytes immediately to avoid Android gallery content handles expiring before submit.
-          const stableFile = await snapshotFileForUpload(file);
-          newImages.push({
-            file: stableFile,
-            preview: URL.createObjectURL(stableFile),
-            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          });
-        } catch (snapshotError) {
-          console.error('Failed to prepare image for upload:', snapshotError);
-          errors.push(`Could not access "${file.name}" from gallery. Please reselect the image and try again.`);
-        }
-      }
-    }
-
-    if (errors.length > 0) {
-      errors.forEach(err => toast.error(err));
-    }
-
-    if (newImages.length > 0) {
-      setSelectedImages(prev => [...prev, ...newImages]);
-      setPageCount(prev => prev + newImages.length);
-    }
-
-    // Reset input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    newImages.push({ file, preview: URL.createObjectURL(file), id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}` });
+    setSelectedImages(prev => [...prev, ...newImages]);
+    setPageCount(prev => prev + 1);
   };
 
   const removeImage = (id: string) => {
@@ -288,38 +249,43 @@ const SubmitAssignment = () => {
         submissionId = newSubmission.id;
       }
 
-      // Show verification progress
+      // The row is a draft until the student confirms the AI result.
       setVerifyingSubmissionId(submissionId);
       setShowProgress(true);
-      toast.success(`${uploadedUrls.length} page(s) submitted! AI verification started.`);
+      setVerificationReady(false);
+      setVerificationScore(null);
+      toast.success(`${uploadedUrls.length} page(s) captured. AI consistency review started.`);
       
       // Trigger AI handwriting verification with all image URLs
       // (session freshness + 401 retry handled by invokeEdgeFunction)
-      invokeEdgeFunction('verify-handwriting', {
+      const { error: verificationError } = await invokeEdgeFunction('verify-handwriting', {
         body: {
           submission_id: submissionId,
-          file_urls: uploadedUrls,
-          file_type: 'image/jpeg',
-          student_profile_id: profile.id,
-          page_count: uploadedUrls.length,
         },
-      }).then(({ error }) => {
-        if (error) {
-          console.error('Verification error:', error);
-          toast.error(
-            error.name === 'SessionExpiredError'
-              ? 'Your session expired. Please sign in again to run verification.'
-              : 'Handwriting verification failed. Your submission is saved but may need manual review.'
-          );
-        }
-      }).catch((err) => {
-        console.error('Verification failed:', err);
-        toast.error('Handwriting verification failed. Your submission is saved but may need manual review.');
       });
+      if (verificationError) {
+        console.error('Verification error:', verificationError);
+        toast.error(verificationError.name === 'SessionExpiredError' ? 'Your session expired. Please sign in again.' : 'AI consistency review failed. Recapture the affected pages.');
+      }
 
     } catch (error: any) {
       console.error('Error submitting assignment:', error);
       toast.error(error.message || 'Failed to submit assignment. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFinalSubmit = async () => {
+    if (!verifyingSubmissionId || verificationScore === null) return;
+    setUploading(true);
+    try {
+      const { error } = await invokeEdgeFunction('finalize-submission', { body: { submission_id: verifyingSubmissionId } });
+      if (error) throw error;
+      toast.success('Assignment submitted with its AI-assisted consistency result.');
+      navigate('/student/submissions');
+    } catch (error: any) {
+      toast.error(error.message || 'Could not finalize the submission.');
     } finally {
       setUploading(false);
     }
@@ -428,13 +394,13 @@ const SubmitAssignment = () => {
           </Alert>
         )}
 
-        {/* Reupload Required Warning */}
+        {/* Previous low-consistency warning */}
         {existingSubmission?.verified_at && existingSubmission?.ai_risk_level === 'high' && (
           <Alert variant="destructive" className="mb-6">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Reupload Required</AlertTitle>
+            <AlertTitle>Low consistency result</AlertTitle>
             <AlertDescription>
-              Your last submission scored below 50 in handwriting verification. Please reupload clear handwritten images.
+              Your last submission had low handwriting consistency. Recapture clear handwritten pages or request manual review.
             </AlertDescription>
           </Alert>
         )}
@@ -460,17 +426,28 @@ const SubmitAssignment = () => {
               pageCount={pageCount}
               onComplete={(status, score) => {
                 console.log('Verification complete:', status, score);
-                if (status === 'verified') {
-                  toast.success('Handwriting verified successfully!');
-                } else if (status === 'needs_manual_review') {
-                  toast.info('Submission sent for manual review.');
-                } else {
-                  toast.warning('Please check your submission status.');
-                }
-                setTimeout(() => navigate('/student/submissions'), 2500);
+                setVerificationScore(typeof score === 'number' ? score : null);
+                const hasUsableResult = typeof score === 'number' && Number.isFinite(score);
+                setVerificationReady(hasUsableResult);
+                if (hasUsableResult) toast.success(`Consistency review complete: ${score}%`);
+                else toast.warning('No consistency score was produced. Recapture the page or request manual review.');
               }}
             />
           </div>
+        )}
+
+        {verificationReady && verificationScore !== null && (
+          <Alert className="mb-6 border-student/40 bg-student/5">
+            <CheckCircle className="h-4 w-4 text-student" />
+            <AlertTitle>AI-assisted consistency review complete</AlertTitle>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>Aggregate score: <strong>{verificationScore}%</strong> ({verificationScore >= 80 ? 'High consistency' : verificationScore >= 60 ? 'Medium consistency - manual review' : 'Low consistency - recapture or manual review'})</span>
+              <Button onClick={handleFinalSubmit} disabled={uploading} variant="student">
+                {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
+                Final Submit
+              </Button>
+            </AlertDescription>
+          </Alert>
         )}
 
         {/* Upload Section */}
@@ -478,11 +455,10 @@ const SubmitAssignment = () => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Image className="w-5 h-5" />
-              Upload Handwritten Pages
+              Capture Handwritten Pages
             </CardTitle>
             <CardDescription>
-              Upload images of your handwritten assignment (one image per page). 
-              Drag to reorder pages if needed.
+              Capture each handwritten page with the mobile camera. AI reviews every page against your enrollment samples before final submission.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -527,63 +503,10 @@ const SubmitAssignment = () => {
                   </div>
                 ))}
                 
-                {/* Add More Button */}
-                {selectedImages.length < MAX_IMAGES && (
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="border-2 border-dashed rounded-lg aspect-[3/4] flex flex-col items-center justify-center text-muted-foreground hover:border-primary hover:text-primary transition-colors"
-                  >
-                    <Upload className="w-8 h-8 mb-2" />
-                    <span className="text-xs">Add Page</span>
-                  </button>
-                )}
               </div>
             )}
 
-            {/* Initial Upload Area */}
-            {selectedImages.length === 0 && (
-              <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                <Image className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-lg font-medium mb-2">Upload Handwritten Assignment Images</p>
-                <p className="text-sm text-muted-foreground mb-1">
-                  One image per handwritten page
-                </p>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Supported: JPG, PNG, WEBP, HEIC (iPhone) — max 30MB each
-                </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*,.jpg,.jpeg,.png,.webp,.heic,.heif"
-                  multiple
-                  onChange={handleFileSelect}
-                  className="hidden"
-                  id="file-upload"
-                />
-                <Button
-                  variant="student"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload className="w-4 h-4 mr-2" />
-                  Choose Images
-                </Button>
-                <p className="text-xs text-muted-foreground mt-4">
-                  Handwriting will be verified automatically by AI on each page.
-                </p>
-              </div>
-            )}
-
-            {/* Hidden file input for adding more (only rendered when images exist, avoids duplicate) */}
-            {selectedImages.length > 0 && (
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,.jpg,.jpeg,.png,.webp,.heic,.heif"
-                multiple
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-            )}
+            <DocumentCapture pageNumber={selectedImages.length + 1} onCapture={handleCapture} disabled={uploading || selectedImages.length >= MAX_IMAGES} />
 
             {/* Submit Button */}
             {selectedImages.length > 0 && (
@@ -595,17 +518,17 @@ const SubmitAssignment = () => {
                   variant="student"
                   className="w-full"
                   onClick={handleSubmit}
-                  disabled={uploading}
+                  disabled={uploading || showProgress || verificationReady}
                 >
                   {uploading ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                      Uploading {selectedImages.length} page(s)...
+                      Preparing {selectedImages.length} page(s)...
                     </>
                   ) : (
                     <>
                       <Upload className="w-4 h-4 mr-2" />
-                      {existingSubmission ? 'Update Submission' : 'Submit Assignment'}
+                      Review Captured Pages
                     </>
                   )}
                 </Button>

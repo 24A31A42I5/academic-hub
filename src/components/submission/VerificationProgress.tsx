@@ -56,7 +56,7 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
             ? 'Aggregating page results...'
             : 'Comparing writing characteristics...';
         case 'complete':
-          return 'Verification complete';
+          return 'Consistency review complete';
         default:
           return 'Processing...';
       }
@@ -158,6 +158,24 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
         )
         .subscribe();
 
+      // The function may finish before the realtime channel is fully ready.
+      // Read the current row once so the result gate cannot remain stuck.
+      supabase.from('submissions')
+        .select('verified_at, status, ai_similarity_score, ai_risk_level, page_verification_results, ai_analysis_details')
+        .eq('id', submissionId)
+        .single()
+        .then(({ data: current }) => {
+          if (!current?.verified_at || isComplete) return;
+          setStage('complete');
+          setIsComplete(true);
+          setStatus(current.status);
+          setScore(current.ai_similarity_score);
+          setRiskLevel(current.ai_risk_level);
+          setPageResults(current.page_verification_results || current.ai_analysis_details?.page_results || []);
+          if (current.ai_analysis_details?.error_type) setErrorType(current.ai_analysis_details.error_type);
+          onComplete?.(current.status, current.ai_similarity_score);
+        });
+
       // Timeout fallback after 90 seconds (longer for multi-page)
       const timeoutTimer = setTimeout(() => {
         if (!isComplete) {
@@ -196,21 +214,21 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
           return (
             <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold text-[hsl(142,76%,36%)] border-[hsl(142,76%,36%)] bg-secondary">
               <CheckCircle className="w-3 h-3 mr-1" />
-              Verified ({score}%)
+              High consistency ({score}%)
             </span>
           );
         case 'medium':
           return (
             <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold text-accent-foreground border-accent bg-secondary">
               <AlertTriangle className="w-3 h-3 mr-1" />
-              Manual Review ({score}%)
+              Medium consistency - manual review ({score}%)
             </span>
           );
         case 'high':
           return (
             <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-destructive text-destructive-foreground">
               <XCircle className="w-3 h-3 mr-1" />
-              Reupload Required ({score}%)
+              Low consistency - recapture or manual review ({score}%)
             </span>
           );
         default:
@@ -307,12 +325,12 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
             {isComplete && !error && pageResults.length <= 1 && (
               <div className="pt-2 border-t border-border/50">
                 <p className="text-xs text-muted-foreground">
-                  {riskLevel === 'low' && 'Handwriting verified successfully. Your submission matches your profile.'}
-                  {riskLevel === 'medium' && errorType === 'no_profile' && 'No handwriting profile found. Please upload your handwriting sample.'}
+                  {riskLevel === 'low' && 'The captured handwriting is highly consistent with your enrollment samples.'}
+                  {riskLevel === 'medium' && errorType === 'no_profile' && 'Enrollment is incomplete. Add more camera samples before automatic consistency review.'}
                   {riskLevel === 'medium' && errorType === 'file_too_large' && 'File too large for automatic analysis. Try using smaller images.'}
                   {riskLevel === 'medium' && errorType === 'typed_content_detected' && 'Typed/printed content detected. Please submit handwritten pages only.'}
                   {riskLevel === 'medium' && !errorType && 'Some differences detected. Faculty will review your submission.'}
-                  {riskLevel === 'high' && 'Significant differences detected. Please reupload clear handwritten images.'}
+                  {riskLevel === 'high' && 'Low consistency detected. Recapture clear handwritten pages or request manual review.'}
                 </p>
               </div>
             )}
