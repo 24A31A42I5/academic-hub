@@ -1,498 +1,186 @@
+/**
+ * v8 enrollment: one camera-captured sample per call.
+ * - Identity comes from the JWT, never from the request body.
+ * - The sample path must live under the caller's own storage folder.
+ * - Accepted samples are stored in handwriting_samples; once >= 3 exist the
+ *   consolidated profile is written to student_details.
+ */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
+import { z } from "npm:zod@3.23.8";
+import { analyzeHandwriting } from "../_shared/handwriting/analysisService.ts";
+import { createLovableGeminiProvider } from "../_shared/handwriting/provider.ts";
+import { MAX_ENROLLMENT_SAMPLES, MIN_ENROLLMENT_SAMPLES, MIN_EXTRACTION_CONFIDENCE } from "../_shared/handwriting/config.ts";
+import { SCHEMA_VERSION, UNKNOWN, type ExtractedProfile, type FeatureName } from "../_shared/handwriting/schema.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
-
-const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const BUCKET = 'handwriting-samples';
 
-// ==================== STRICT ENUM DEFINITIONS ====================
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-const VALID_ENUMS: Record<string, string[]> = {
-  slant: ['left_lean', 'right_lean', 'upright'],
-  stroke_weight: ['thin', 'medium', 'thick'],
-  letter_spacing: ['tight', 'normal', 'wide'],
-  word_spacing: ['tight', 'normal', 'wide'],
-  baseline: ['straight', 'wavy', 'variable'],
-  height_ratio: ['short', 'moderate', 'tall'],
-  writing_style: ['cursive', 'print', 'mixed'],
-  connectivity: ['connected', 'semi_connected', 'disconnected'],
-  line_stability: ['straight', 'rising', 'descending', 'erratic'],
-  letter_shape: ['rounded', 'angular', 'looped', 'open', 'closed', 'simple', 'mixed'],
-};
+const BodySchema = z.object({
+  action: z.enum(['enroll', 'rebuild']).default('enroll'),
+  storage_path: z.string().min(3).max(300).optional(),
+  quality_metrics: z.record(z.unknown()).optional(),
+});
 
-const REQUIRED_FIELDS = [
-  'slant', 'stroke_weight', 'letter_spacing', 'word_spacing',
-  'baseline', 'height_ratio', 'writing_style', 'connectivity', 'line_stability'
-];
-
-function validateProfile(profile: any): boolean {
-  for (const field of REQUIRED_FIELDS) {
-    if (!VALID_ENUMS[field]?.includes(profile[field])) {
-      console.error(`Invalid ${field}:`, profile[field]);
-      return false;
-    }
-  }
-  const letters = ['a', 'e', 'g', 'r', 't', 's'];
-  for (const letter of letters) {
-    const shape = profile.letter_formations?.[letter];
-    if (shape && !VALID_ENUMS.letter_shape.includes(shape)) {
-      console.error(`Invalid shape for letter ${letter}:`, shape);
-      return false;
-    }
-  }
-  return true;
+async function sha256Hex(buf: ArrayBuffer) {
+  const h = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(h)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-const EXTRACTION_ATTEMPTS = 3;
-
-function pickMostFrequent<T extends string>(values: T[], fallback: T): T {
-  if (values.length === 0) return fallback;
-  const counts = new Map<T, number>();
-  for (const value of values) {
-    counts.set(value, (counts.get(value) ?? 0) + 1);
+/** Consolidated profile: per-feature mode + variability across samples. */
+function consolidate(samples: Array<{ id: string; extracted_features: ExtractedProfile }>) {
+  const feats = Object.keys(samples[0].extracted_features.features) as FeatureName[];
+  const consensus: Record<string, string> = {};
+  const variability: Record<string, number> = {};
+  for (const f of feats) {
+    const vals = samples.map((s) => s.extracted_features.features[f]).filter((v) => v && v !== UNKNOWN);
+    if (!vals.length) { consensus[f] = UNKNOWN; continue; }
+    const counts = new Map<string, number>();
+    vals.forEach((v) => counts.set(v, (counts.get(v) ?? 0) + 1));
+    const [mode, n] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    consensus[f] = mode;
+    variability[f] = Number((1 - n / vals.length).toFixed(2));
   }
-  let best = fallback;
-  let bestCount = -1;
-  for (const [value, count] of counts.entries()) {
-    if (count > bestCount) {
-      best = value;
-      bestCount = count;
-    }
-  }
-  return best;
-}
-
-function buildConsensusProfile(profiles: any[]): any {
-  const base = profiles[0];
   return {
-    slant: pickMostFrequent(profiles.map((p) => p.slant), base.slant),
-    stroke_weight: pickMostFrequent(profiles.map((p) => p.stroke_weight), base.stroke_weight),
-    letter_spacing: pickMostFrequent(profiles.map((p) => p.letter_spacing), base.letter_spacing),
-    word_spacing: pickMostFrequent(profiles.map((p) => p.word_spacing), base.word_spacing),
-    baseline: pickMostFrequent(profiles.map((p) => p.baseline), base.baseline),
-    height_ratio: pickMostFrequent(profiles.map((p) => p.height_ratio), base.height_ratio),
-    writing_style: pickMostFrequent(profiles.map((p) => p.writing_style), base.writing_style),
-    connectivity: pickMostFrequent(profiles.map((p) => p.connectivity ?? 'semi_connected'), base.connectivity ?? 'semi_connected'),
-    line_stability: pickMostFrequent(profiles.map((p) => p.line_stability ?? 'straight'), base.line_stability ?? 'straight'),
-    letter_formations: {
-      a: pickMostFrequent(profiles.map((p) => p.letter_formations?.a ?? 'simple'), base.letter_formations?.a ?? 'simple'),
-      e: pickMostFrequent(profiles.map((p) => p.letter_formations?.e ?? 'simple'), base.letter_formations?.e ?? 'simple'),
-      g: pickMostFrequent(profiles.map((p) => p.letter_formations?.g ?? 'simple'), base.letter_formations?.g ?? 'simple'),
-      r: pickMostFrequent(profiles.map((p) => p.letter_formations?.r ?? 'simple'), base.letter_formations?.r ?? 'simple'),
-      t: pickMostFrequent(profiles.map((p) => p.letter_formations?.t ?? 'simple'), base.letter_formations?.t ?? 'simple'),
-      s: pickMostFrequent(profiles.map((p) => p.letter_formations?.s ?? 'simple'), base.letter_formations?.s ?? 'simple'),
-    },
-    is_handwritten: true,
-    confidence_level: Math.max(0, Math.min(1, profiles.reduce((sum, p) => sum + (p.confidence_level ?? 0.8), 0) / profiles.length)),
+    version: SCHEMA_VERSION,
+    sample_count: samples.length,
+    sample_ids: samples.map((s) => s.id),
+    consensus_features: consensus,
+    feature_variability: variability,
+    mean_confidence: Number((samples.reduce((s, x) => s + x.extracted_features.overall_confidence, 0) / samples.length).toFixed(3)),
+    trained_at: new Date().toISOString(),
   };
 }
 
-// ==================== EXTRACTION PROMPT ====================
-
-const EXTRACTION_PROMPT = `You are a forensic handwriting analyst extracting biometric features from a handwriting sample. You MUST return a structured JSON object with EXACT enum values for each feature.
-
-CRITICAL RULES:
-1. Use ONLY the exact string values specified below
-2. Do NOT use synonyms, descriptions, or variations
-3. Return valid JSON without markdown code fences
-4. Do NOT include preamble or explanation text
-
-FEATURE EXTRACTION INSTRUCTIONS:
-
-**1. SLANT** — Measure vertical stroke angle relative to baseline
-- If strokes lean noticeably left (angle < 85°): return EXACTLY "left_lean"
-- If strokes lean noticeably right (angle > 95°): return EXACTLY "right_lean"
-- If strokes are vertical or nearly vertical (85-95°): return EXACTLY "upright"
-
-**2. STROKE_WEIGHT** — Observe line thickness
-- If lines are noticeably thinner than standard ballpoint pen: return EXACTLY "thin"
-- If lines are noticeably thicker than standard ballpoint pen: return EXACTLY "thick"
-- If lines are standard thickness: return EXACTLY "medium"
-
-**3. LETTER_SPACING** — Measure horizontal space between letters within words
-- If letters touch or nearly touch (< 2mm gap): return EXACTLY "tight"
-- If letters have large gaps (> 5mm): return EXACTLY "wide"
-- If spacing is standard (2-5mm): return EXACTLY "normal"
-
-**4. WORD_SPACING** — Measure horizontal space between words
-- If word gaps are narrow (< 8mm): return EXACTLY "tight"
-- If word gaps are large (> 15mm): return EXACTLY "wide"
-- If spacing is standard (8-15mm): return EXACTLY "normal"
-
-**5. BASELINE** — Observe whether writing sits on a straight horizontal line
-- If writing follows a straight horizontal line: return EXACTLY "straight"
-- If writing curves or waves consistently: return EXACTLY "wavy"
-- If baseline is inconsistent or erratic: return EXACTLY "variable"
-
-**6. HEIGHT_RATIO** — Compare the height of uppercase to lowercase letters
-- If uppercase is 2x or taller than lowercase: return EXACTLY "tall"
-- If uppercase is 1.3-1.7x the height of lowercase: return EXACTLY "moderate"
-- If uppercase is barely taller than lowercase: return EXACTLY "short"
-
-**7. WRITING_STYLE** — Identify the connection pattern between letters
-- If most letters connect in flowing cursive: return EXACTLY "cursive"
-- If letters are clearly separated (print): return EXACTLY "print"
-- If partially connected: return EXACTLY "mixed"
-
-**8. CONNECTIVITY** — Measure how strokes connect between letters
-- If strokes flow continuously between most letters: return EXACTLY "connected"
-- If some letters connect, some don't: return EXACTLY "semi_connected"
-- If letters are clearly isolated: return EXACTLY "disconnected"
-
-**9. LINE_STABILITY** — Observe the trend of baseline across the page
-- If baseline maintains straight horizontal: return EXACTLY "straight"
-- If baseline trends upward across the page: return EXACTLY "rising"
-- If baseline trends downward: return EXACTLY "descending"
-- If baseline varies inconsistently: return EXACTLY "erratic"
-
-**10. LETTER_FORMATIONS** — For each letter (a, e, g, r, t, s), classify shape:
-- Smooth curves dominant: return EXACTLY "rounded"
-- Sharp angles dominant: return EXACTLY "angular"
-- Has decorative loops: return EXACTLY "looped"
-- Open tops/sides: return EXACTLY "open"
-- Fully enclosed: return EXACTLY "closed"
-- Plain/simple form: return EXACTLY "simple"
-- Mixed characteristics: return EXACTLY "mixed"
-
-**11. IS_HANDWRITTEN** — Content type detection
-- Handwritten text: return true
-- Typed/printed text: return false
-
-**12. CONFIDENCE_LEVEL** — Feature visibility (0.0 to 1.0)
-- Clear, well-lit image with distinct features: 0.9
-- Slightly blurry or low contrast: 0.7
-- Poor quality or unclear features: 0.5
-
-REQUIRED JSON OUTPUT FORMAT (no markdown, no explanation):
-
-{
-  "slant": "right_lean",
-  "stroke_weight": "medium",
-  "letter_spacing": "normal",
-  "word_spacing": "normal",
-  "baseline": "straight",
-  "height_ratio": "moderate",
-  "writing_style": "print",
-  "connectivity": "semi_connected",
-  "line_stability": "straight",
-  "letter_formations": {
-    "a": "rounded",
-    "e": "open",
-    "g": "looped",
-    "r": "angular",
-    "t": "simple",
-    "s": "closed"
-  },
-  "is_handwritten": true,
-  "confidence_level": 0.9
-}`;
-
-// ==================== HELPERS ====================
-
-async function fetchFileAsBase64(url: string): Promise<string> {
-  console.log('Fetching file:', url);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch file: ${response.status}`);
-  }
-  const arrayBuffer = await response.arrayBuffer();
-  return encode(arrayBuffer);
-}
-
-function getHandwritingStoragePath(urlOrPath: string): string | null {
-  if (!urlOrPath) return null;
-  const clean = urlOrPath.split('?')[0];
-  const marker = '/handwriting-samples/';
-  const idx = clean.indexOf(marker);
-  if (idx >= 0) return clean.substring(idx + marker.length);
-  // Treat as bare path
-  if (!clean.startsWith('http')) return clean;
-  return null;
-}
-
-async function downloadHandwritingAsBase64(
-  supabaseAdmin: any,
-  storagePath: string,
-): Promise<string> {
-  console.log('Downloading handwriting from storage:', storagePath);
-  const { data, error } = await supabaseAdmin.storage
-    .from('handwriting-samples')
-    .download(storagePath);
-  if (error || !data) {
-    throw new Error(`Failed to download handwriting sample: ${error?.message ?? 'unknown'}`);
-  }
-  const arrayBuffer = await data.arrayBuffer();
-  return encode(arrayBuffer);
-}
-
-// ==================== MAIN HANDLER ====================
-
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
   try {
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: 'Server not configured' }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    const token = (req.headers.get('authorization') ?? '').replace('Bearer ', '').trim();
+    if (!token) return json({ error: 'Unauthorized' }, 401);
+    const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // Create Supabase admin client (service role)
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    let userId: string | null = null;
+    try {
+      const authClient = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY') ?? '');
+      const { data } = await authClient.auth.getClaims(token);
+      userId = (data?.claims?.sub as string | undefined) ?? null;
+    } catch { /* fall through */ }
+    if (!userId) userId = (await admin.auth.getUser(token)).data.user?.id ?? null;
+    if (!userId) return json({ error: 'Unauthorized' }, 401);
 
-    // ==================== AUTHENTICATION ====================
-    const authHeader = req.headers.get('authorization') ?? '';
-    const token = authHeader.replace('Bearer ', '').trim();
-    if (!token) {
-      return new Response(JSON.stringify({ error: 'Missing authorization token' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    const parsed = BodySchema.safeParse(await req.json().catch(() => ({})));
+    if (!parsed.success) return json({ error: 'Invalid request' }, 400);
+    const { action, storage_path, quality_metrics } = parsed.data;
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    const { data: profile } = await admin.from('profiles').select('id, role').eq('user_id', userId).single();
+    if (!profile || profile.role !== 'student') return json({ error: 'Only students can enroll handwriting samples.' }, 403);
+    const { data: details } = await admin.from('student_details').select('id').eq('profile_id', profile.id).single();
+    if (!details) return json({ error: 'Student record not found.' }, 404);
 
-    const { image_url, student_details_id, retrain } = await req.json();
-
-    console.log('=== HANDWRITING FEATURE EXTRACTION v7.0 START ===');
-    console.log('Caller user ID:', user.id);
-    console.log('Student details ID:', student_details_id);
-    console.log('Retrain mode:', !!retrain);
-
-    if (!image_url || !student_details_id) {
-      return new Response(JSON.stringify({ error: 'Missing required parameters: image_url and student_details_id' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // ==================== AUTHORIZATION ====================
-    // Caller must be admin OR the student that owns the target student_details row.
-    const { data: callerProfile, error: callerProfileError } = await supabase
-      .from('profiles')
-      .select('id, role')
-      .eq('user_id', user.id)
-      .single();
-
-    if (callerProfileError || !callerProfile) {
-      return new Response(JSON.stringify({ error: 'Caller profile not found' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    const { data: targetStudent, error: targetError } = await supabase
-      .from('student_details')
-      .select('id, profile_id')
-      .eq('id', student_details_id)
-      .single();
-
-    if (targetError || !targetStudent) {
-      return new Response(JSON.stringify({ error: 'Target student not found' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    const isAdmin = callerProfile.role === 'admin';
-    const isOwner = callerProfile.id === targetStudent.profile_id;
-    if (!isAdmin && !isOwner) {
-      return new Response(JSON.stringify({ error: 'Forbidden' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // If retraining, clear old features first (service_role bypasses RLS trigger)
-    if (retrain) {
-      console.log('Retrain mode: clearing old features...');
-      const { error: clearError } = await supabase
-        .from('student_details')
-        .update({
-          handwriting_feature_embedding: null,
-          handwriting_features_extracted_at: null,
-        })
-        .eq('id', student_details_id);
-
-      if (clearError) {
-        console.error('Failed to clear old features:', clearError);
-        throw new Error('Failed to clear old handwriting features');
-      }
-      console.log('Old features cleared successfully');
-    }
-
-    // Fetch image as base64
-    // Resolve to a storage path within the private handwriting-samples bucket.
-    // We always download via the service-role client so that the bucket can stay
-    // private and we never depend on a publicly accessible URL.
-    const storagePath = getHandwritingStoragePath(image_url);
-    let imageBase64: string;
-    if (storagePath) {
-      imageBase64 = await downloadHandwritingAsBase64(supabase, storagePath);
-    } else {
-      // Backwards compatibility: if for some reason the URL is an external
-      // location (legacy data), fall back to a direct fetch.
-      imageBase64 = await fetchFileAsBase64(image_url);
-    }
-    console.log('Image fetched, base64 length:', imageBase64.length);
-
-    console.log(`Calling Gemini AI for strict enum extraction (${EXTRACTION_ATTEMPTS} parallel attempts)...`);
-
-    const extractedProfiles: any[] = [];
-    let nonHandwrittenVotes = 0;
-
-    const runAttempt = async (attempt: number) => {
-      const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
-          temperature: 0,
-          top_p: 0.1,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: EXTRACTION_PROMPT },
-                {
-                  type: 'image_url',
-                  image_url: { url: `data:image/jpeg;base64,${imageBase64}` }
-                }
-              ]
-            }
-          ],
-        }),
-      });
-
-      if (!aiResponse.ok) {
-        const errorText = await aiResponse.text();
-        console.error('AI Gateway error:', aiResponse.status, errorText);
-        if (aiResponse.status === 429) throw new Error('Rate limit exceeded. Please try again later.');
-        if (aiResponse.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
-        throw new Error(`AI analysis failed: ${aiResponse.status}`);
-      }
-
-      const aiData = await aiResponse.json();
-      const responseText = aiData.choices?.[0]?.message?.content || '';
-      console.log(`Gemini response attempt ${attempt}/${EXTRACTION_ATTEMPTS}, length:`, responseText.length);
-
-      const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-      const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.error(`No JSON found in attempt ${attempt}`);
-        return null;
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-
-      if (typeof parsed.confidence_level !== 'number') {
-        parsed.confidence_level = 0.5;
+    const rebuildProfile = async () => {
+      const { data: accepted } = await admin.from('handwriting_samples')
+        .select('id, storage_path, extracted_features, created_at')
+        .eq('student_profile_id', profile.id).eq('status', 'accepted').order('created_at');
+      const count = accepted?.length ?? 0;
+      const update: Record<string, unknown> = { handwriting_sample_count: count, handwriting_profile_version: SCHEMA_VERSION };
+      if (count >= MIN_ENROLLMENT_SAMPLES) {
+        update.handwriting_feature_embedding = consolidate(accepted as never);
+        update.handwriting_features_extracted_at = new Date().toISOString();
       } else {
-        parsed.confidence_level = Math.max(0, Math.min(1, parsed.confidence_level));
+        update.handwriting_feature_embedding = null;
+        update.handwriting_features_extracted_at = null;
       }
-
-      return parsed;
+      if (count > 0) {
+        update.handwriting_url = accepted![0].storage_path;
+        update.handwriting_submitted_at = accepted![0].created_at;
+      }
+      const { error } = await admin.from('student_details').update(update).eq('id', details.id);
+      if (error) throw new Error('Failed to save handwriting profile.');
+      return count;
     };
 
-    // Run the three consensus passes concurrently — ~3x faster training.
-    const settled = await Promise.allSettled(
-      Array.from({ length: EXTRACTION_ATTEMPTS }, (_, i) => runAttempt(i + 1))
-    );
-
-    if (settled.every((s) => s.status === 'rejected')) {
-      throw (settled[0] as PromiseRejectedResult).reason;
+    if (action === 'rebuild') {
+      const count = await rebuildProfile();
+      return json({ success: true, sample_count: count, profile_ready: count >= MIN_ENROLLMENT_SAMPLES });
     }
 
-    settled.forEach((outcome, index) => {
-      if (outcome.status !== 'fulfilled' || !outcome.value) {
-        if (outcome.status === 'rejected') {
-          console.error(`Extraction attempt ${index + 1}/${EXTRACTION_ATTEMPTS} failed:`, outcome.reason);
-        }
-        return;
-      }
-      const parsed = outcome.value;
-      if (parsed.is_handwritten === false) nonHandwrittenVotes++;
-      if (!validateProfile(parsed)) {
-        console.error(`Strict enum validation failed for attempt ${index + 1}`);
-        return;
-      }
-      extractedProfiles.push(parsed);
-      console.log(`Extraction attempt ${index + 1}/${EXTRACTION_ATTEMPTS} succeeded`);
-    });
-
-
-    if (nonHandwrittenVotes >= 2) {
-      throw new Error('Uploaded sample appears typed/printed instead of handwritten');
+    // ---------- enroll ----------
+    if (!storage_path) return json({ error: 'storage_path is required' }, 400);
+    // Only the caller's own folder, no traversal.
+    if (!storage_path.startsWith(`${userId}/samples/`) || storage_path.includes('..')) {
+      return json({ error: 'Access denied for this file.' }, 403);
     }
 
-    if (extractedProfiles.length === 0) {
-      throw new Error('Failed to create handwriting profile from image');
+    const { count: acceptedCount } = await admin.from('handwriting_samples')
+      .select('id', { count: 'exact', head: true })
+      .eq('student_profile_id', profile.id).eq('status', 'accepted');
+    if ((acceptedCount ?? 0) >= MAX_ENROLLMENT_SAMPLES) {
+      return json({ error: `You already have ${MAX_ENROLLMENT_SAMPLES} enrollment samples.` }, 409);
     }
 
-    const handwritingProfile = extractedProfiles.length === 1
-      ? extractedProfiles[0]
-      : buildConsensusProfile(extractedProfiles);
+    const { data: blob, error: dlErr } = await admin.storage.from(BUCKET).download(storage_path);
+    if (dlErr || !blob) return json({ error: 'Could not read the captured image from storage. Please capture again.' }, 502);
+    const buf = await blob.arrayBuffer();
+    const imageHash = await sha256Hex(buf);
 
-    // Add metadata
-    handwritingProfile.version = '7.0-masterpiece-weighted';
-    handwritingProfile.trained_at = new Date().toISOString();
-    handwritingProfile.reference_image_url = image_url;
+    const reject = async (status: number, error: string, code: string) => {
+      await admin.storage.from(BUCKET).remove([storage_path]);
+      return json({ error, code }, status);
+    };
 
-    console.log(`Built profile consensus from ${extractedProfiles.length}/${EXTRACTION_ATTEMPTS} successful attempts`);
-    console.log('Validated handwriting profile:', JSON.stringify(handwritingProfile, null, 2));
-
-    // Update student_details with new profile
-
-    const { error: updateError } = await supabase
-      .from('student_details')
-      .update({
-        handwriting_feature_embedding: handwritingProfile,
-        handwriting_features_extracted_at: new Date().toISOString(),
-      })
-      .eq('id', student_details_id);
-
-    if (updateError) {
-      console.error('Error updating student details:', updateError);
-      throw new Error('Failed to save handwriting profile');
+    const { data: dup } = await admin.from('handwriting_samples').select('student_profile_id').eq('image_hash', imageHash).limit(1);
+    if (dup?.length) {
+      return reject(409, dup[0].student_profile_id === profile.id
+        ? 'This exact image is already one of your samples. Capture a new page.'
+        : 'This image is already registered to another account.', 'duplicate');
     }
 
-    console.log('=== HANDWRITING FEATURE EXTRACTION v7.0 COMPLETE ===');
+    const result = await analyzeHandwriting(createLovableGeminiProvider(Deno.env.get('LOVABLE_API_KEY')), encode(buf));
+    if (!result.ok) {
+      // Processing failure — never treated as a handwriting judgement.
+      const status = result.error_type === 'rate_limit' ? 429 : result.error_type === 'credits' ? 402 : 503;
+      return reject(status, result.message, result.error_type);
+    }
+    const p = result.profile;
+    if (!p.is_handwritten || p.quality_status === 'not_handwriting') return reject(422, 'This page does not look handwritten. Write the sample text by hand and capture it again.', 'not_handwriting');
+    if (p.quality_status === 'insufficient_handwriting') return reject(422, 'Not enough handwriting on the page. Fill the page with the sample text and capture again.', 'insufficient_handwriting');
+    if (p.quality_status !== 'ok' || p.overall_confidence < MIN_EXTRACTION_CONFIDENCE) return reject(422, 'Please capture a clearer handwriting sample (better light, hold steady, whole page in frame).', 'low_confidence');
 
-    return new Response(JSON.stringify({
+    const { data: row, error: insErr } = await admin.from('handwriting_samples').insert({
+      student_profile_id: profile.id,
+      storage_path,
+      image_hash: imageHash,
+      quality_metrics: quality_metrics ?? null,
+      extracted_features: p,
+      extraction_confidence: p.overall_confidence,
+      status: 'accepted',
+      schema_version: SCHEMA_VERSION,
+    }).select('id').single();
+    if (insErr) {
+      console.error('insert sample failed', insErr);
+      return reject(500, 'Could not save the sample. Please try again.', 'db_error');
+    }
+
+    const count = await rebuildProfile();
+    return json({
       success: true,
-      message: 'Handwriting profile created successfully with v7.0 strict enum validation',
-      profile_version: '7.0-masterpiece-weighted',
-      features_validated: true,
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      sample_id: row.id,
+      sample_count: count,
+      profile_ready: count >= MIN_ENROLLMENT_SAMPLES,
+      extraction_confidence: p.overall_confidence,
     });
-
   } catch (error) {
-    console.error('Error in extract-handwriting-features:', error);
-    return new Response(JSON.stringify({
-      error: error instanceof Error ? error.message : 'Unknown error',
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    console.error('extract-handwriting-features error:', error);
+    return json({ error: error instanceof Error ? error.message : 'Unexpected error' }, 500);
   }
 });
