@@ -48,6 +48,10 @@
     --student: 142 71% 45%;
     --student-foreground: 210 40% 98%;
     --student-muted: 142 71% 95%;
+
+    /* Camera viewfinder is always dark, regardless of theme */
+    --camera: 0 0% 4%;
+    --camera-foreground: 0 0% 98%;
     
     --warning: 25 95% 53%;
     --warning-foreground: 210 40% 98%;

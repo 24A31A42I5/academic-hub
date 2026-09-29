@@ -66,6 +66,10 @@ export default {
           foreground: "hsl(var(--student-foreground))",
           muted: "hsl(var(--student-muted))",
         },
+        camera: {
+          DEFAULT: "hsl(var(--camera))",
+          foreground: "hsl(var(--camera-foreground))",
+        },
         warning: {
           DEFAULT: "hsl(var(--warning))",
           foreground: "hsl(var(--warning-foreground))",
