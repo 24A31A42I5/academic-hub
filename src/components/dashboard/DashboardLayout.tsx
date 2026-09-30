@@ -149,19 +149,19 @@ export const DashboardLayout = ({ children, title, role, navItems }: DashboardLa
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border">
-          <div className="flex items-center justify-between px-4 lg:px-8 h-16">
-            <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between gap-2 px-3 sm:px-4 lg:px-8 h-14 sm:h-16">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="lg:hidden p-2 rounded-lg hover:bg-muted"
+                className="lg:hidden p-2 -ml-1 rounded-lg hover:bg-muted shrink-0"
                 aria-label="Open navigation menu">
 
                 <Menu className="w-6 h-6" />
               </button>
-              <h1 className="text-xl lg:text-2xl font-bold">{title}</h1>
+              <h1 className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{title}</h1>
             </div>
-            <div className="flex items-center gap-3">
-              <div className={cn('px-3 py-1.5 rounded-full text-sm font-medium capitalize', config.mutedBg, config.textColor)}>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className={cn('px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full text-xs sm:text-sm font-medium capitalize', config.mutedBg, config.textColor)}>
                 {role}
               </div>
             </div>
@@ -169,7 +169,7 @@ export const DashboardLayout = ({ children, title, role, navItems }: DashboardLa
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 p-4 lg:p-8 overflow-y-auto">
+        <main className="flex-1 w-full max-w-full overflow-x-hidden p-3 sm:p-4 lg:p-8">
           {children}
         </main>
       </div>
