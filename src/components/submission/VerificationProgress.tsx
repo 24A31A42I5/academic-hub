@@ -171,8 +171,8 @@ export const VerificationProgress = forwardRef<HTMLDivElement, VerificationProgr
           setStatus(current.status);
           setScore(current.ai_similarity_score);
           setRiskLevel(current.ai_risk_level);
-          setPageResults(current.page_verification_results || current.ai_analysis_details?.page_results || []);
-          if (current.ai_analysis_details?.error_type) setErrorType(current.ai_analysis_details.error_type);
+          setPageResults(current.page_verification_results || (current.ai_analysis_details as any)?.page_results || []);
+          if ((current.ai_analysis_details as any)?.error_type) setErrorType((current.ai_analysis_details as any).error_type);
           onComplete?.(current.status, current.ai_similarity_score);
         });
 

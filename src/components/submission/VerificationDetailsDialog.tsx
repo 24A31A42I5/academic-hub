@@ -49,6 +49,7 @@ interface VerificationDetailsDialogProps {
 
 export const VerificationDetailsDialog = ({ 
   open, 
+  onOpenChange,
   submission 
 }: VerificationDetailsDialogProps) => {
   const details = submission.ai_analysis_details;
