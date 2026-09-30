@@ -89,16 +89,22 @@ export const DashboardLayout = ({ children, title, role, navItems }: DashboardLa
 
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="p-6 border-b border-border">
-            <Link to="/" className="flex items-center gap-3">
-              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', config.color)}>
+          <div className="p-4 sm:p-6 border-b border-border flex items-center justify-between gap-2">
+            <Link to="/" className="flex items-center gap-3 min-w-0">
+              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', config.color)}>
                 <Shield className="w-6 h-6 text-primary-foreground" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <span className="font-bold text-lg">Academic Hub</span>
                 <p className={cn('text-xs capitalize', config.textColor)}>{role} Portal</p>
               </div>
             </Link>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="lg:hidden p-2 rounded-lg hover:bg-muted shrink-0"
+              aria-label="Close navigation menu">
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Navigation */}
